@@ -29,9 +29,24 @@ document.addEventListener('DOMContentLoaded', () => {
   const promptView = document.getElementById('prompt-view');
   const danceView = document.getElementById('dance-view');
   const danceFrame = document.getElementById('dance-frame');
+  const dancePrompt = document.getElementById('dance-prompt');
   const backBtn = document.getElementById('back-btn');
-  // Load library on start
+  const thread = document.getElementById('thread');
+  const welcome = document.getElementById('welcome');
+  const chips = document.querySelector('.chips-container');
+  const chatList = document.getElementById('chat-list');
+  const newChatBtn = document.getElementById('new-chat-btn');
+  const storageNote = document.getElementById('storage-note');
+
+  let activeChatId = localStorage.getItem('bn-active-chat') || null;
+  let turns = [];
+  let savedChats = [];
+
   loadLibrary();
+  loadStorageStatus();
+  loadChats().then(() => {
+    if (activeChatId) openChat(activeChatId);
+  });
 
   function syncComposer() {
     const ready = promptInput.value.trim().length > 0;
@@ -72,8 +87,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.classList.remove('showing-dance');
   }
 
-  function showDance(url) {
+  function showDance(url, prompt) {
     audioPlayer.pause();
+    dancePrompt.textContent = prompt || '';
     danceFrame.src = url;
     promptView.hidden = true;
     danceView.hidden = false;
@@ -81,6 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   backBtn.addEventListener('click', showPrompt);
+  newChatBtn.addEventListener('click', startNewChat);
 
   // Form submit
   form.addEventListener('submit', async (e) => {
@@ -113,6 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({
           prompt: prompt,
           model: modelSelect.value,
+          chat_id: activeChatId,
         }),
       });
 
@@ -126,10 +144,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
       displaySong(data.song);
       loadLibrary();
+      if (data.chat && data.chat.id) {
+        activeChatId = data.chat.id;
+        localStorage.setItem('bn-active-chat', activeChatId);
+        turns = data.chat.turns || [];
+        renderThread();
+        loadChats();
+      }
+      promptInput.value = '';
+      syncComposer();
       if (!data.dance_url) {
         throw new Error('The dance player was not created.');
       }
-      showDance(data.dance_url);
+      showDance(data.dance_url, prompt);
     } catch (err) {
       errorBox.textContent = err.message;
       errorBox.hidden = false;
@@ -217,7 +244,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         item.querySelector('.play-btn').addEventListener('click', () => {
           displaySong(song);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          if (song.dance_url) {
+            showDance(song.dance_url, song.prompt || song.song_name || '');
+          } else {
+            showPrompt();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
         });
 
         libraryList.appendChild(item);
@@ -225,6 +257,130 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) {
       console.error('Failed to load library:', e);
     }
+  }
+
+  function startNewChat() {
+    activeChatId = null;
+    turns = [];
+    localStorage.removeItem('bn-active-chat');
+    renderThread();
+    renderChatList(savedChats);
+    showPrompt();
+    promptInput.focus();
+  }
+
+  async function loadStorageStatus() {
+    try {
+      const res = await fetch('/api/chats/status');
+      const data = await res.json();
+      if (!data.success) return;
+      if (data.backend === 'supabase') {
+        storageNote.hidden = true;
+        return;
+      }
+      storageNote.textContent = data.message || '';
+      storageNote.hidden = !data.message;
+    } catch (e) {
+      console.error('Failed to read chat storage status:', e);
+    }
+  }
+
+  async function loadChats() {
+    try {
+      const res = await fetch('/api/chats');
+      const data = await res.json();
+      if (!data.success) return;
+      savedChats = data.chats || [];
+      renderChatList(savedChats);
+    } catch (e) {
+      console.error('Failed to load chats:', e);
+    }
+  }
+
+  function renderChatList(chats) {
+    chatList.innerHTML = '';
+    if (!chats.length) {
+      chatList.innerHTML = '<p class="chat-empty">Your prompts will stay here.</p>';
+      return;
+    }
+    chats.forEach(chat => {
+      const row = document.createElement('div');
+      row.className = 'chat-row' + (chat.id === activeChatId ? ' is-active' : '');
+      row.innerHTML = `
+        <button type="button" class="chat-item">
+          <strong>${escapeHtml(chat.title || 'New chat')}</strong>
+        </button>
+        <button type="button" class="chat-delete" aria-label="Delete chat">&times;</button>
+      `;
+      row.querySelector('.chat-item').addEventListener('click', () => openChat(chat.id));
+      row.querySelector('.chat-delete').addEventListener('click', () => removeChat(chat.id));
+      chatList.appendChild(row);
+    });
+  }
+
+  async function openChat(chatId) {
+    try {
+      const res = await fetch('/api/chats/' + encodeURIComponent(chatId));
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        if (activeChatId === chatId) startNewChat();
+        return;
+      }
+      activeChatId = data.chat.id;
+      localStorage.setItem('bn-active-chat', activeChatId);
+      turns = data.chat.turns || [];
+      renderThread();
+      renderChatList(savedChats);
+      showPrompt();
+    } catch (e) {
+      console.error('Failed to open chat:', e);
+    }
+  }
+
+  async function removeChat(chatId) {
+    try {
+      const res = await fetch('/api/chats/' + encodeURIComponent(chatId), { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) return;
+      if (activeChatId === chatId) startNewChat();
+      loadChats();
+    } catch (e) {
+      console.error('Failed to delete chat:', e);
+    }
+  }
+
+  function renderThread() {
+    thread.innerHTML = '';
+    const empty = turns.length === 0;
+    thread.hidden = empty;
+    if (welcome) welcome.hidden = !empty;
+    if (chips) chips.hidden = !empty;
+    if (empty) return;
+    turns.forEach(turn => {
+      const user = document.createElement('div');
+      user.className = 'bubble bubble-user';
+      user.innerHTML = `<p>${escapeHtml(turn.prompt || '')}</p>`;
+      thread.appendChild(user);
+
+      const result = document.createElement('div');
+      result.className = 'bubble bubble-result';
+      const songName = turn.song_name || 'Indian classical song';
+      const details = [turn.raga, turn.tala].filter(Boolean).join(' · ');
+      result.innerHTML = `
+        <p>${escapeHtml(songName)}</p>
+        ${details ? `<div class="bubble-meta">${escapeHtml(details)}</div>` : ''}
+      `;
+      if (turn.dance_url) {
+        const watch = document.createElement('button');
+        watch.type = 'button';
+        watch.className = 'watch-btn';
+        watch.textContent = 'Watch dance';
+        watch.addEventListener('click', () => showDance(turn.dance_url, turn.prompt || ''));
+        result.appendChild(watch);
+      }
+      thread.appendChild(result);
+    });
+    thread.scrollTop = thread.scrollHeight;
   }
 
   function escapeHtml(str) {

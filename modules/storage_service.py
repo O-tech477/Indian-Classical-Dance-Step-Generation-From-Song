@@ -44,6 +44,9 @@ class MusicLibrary:
             "description": song_meta.get("description"),
             "filename": filename,
             "audio_path": song_meta.get("audio_path"),
+            "audio_url": song_meta.get("audio_url") or (f"/audio/{filename}" if filename else None),
+            "prompt": song_meta.get("prompt"),
+            "dance_url": song_meta.get("dance_url"),
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
 

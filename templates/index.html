@@ -10,7 +10,23 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="app-container">
+  <div class="shell">
+  <aside class="chat-rail" id="chat-rail">
+    <div class="rail-top">
+      <div class="rail-brand">
+        <span class="logo-mark" aria-hidden="true">🪷</span>
+        <div>
+          <strong>Bharatanatyam</strong>
+          <span>Music and dance</span>
+        </div>
+      </div>
+      <button type="button" id="new-chat-btn" class="new-chat-btn">+ New chat</button>
+    </div>
+    <p id="storage-note" class="storage-note" hidden></p>
+    <p class="rail-label">History</p>
+    <div id="chat-list" class="chat-list"></div>
+  </aside>
+  <div class="stage">
     <!-- Header -->
     <header class="header">
       <div class="logo-group">
@@ -23,13 +39,17 @@
     </header>
 
     <!-- Main Content Grid -->
-    <main class="main-grid" id="prompt-view">
-      <!-- Left Column: Input and Curation Controls -->
+    <main class="conversation" id="prompt-view">
       <section class="card curate-section">
-        <h2 class="section-title">Curate New Dance Music</h2>
-        <p class="section-desc">Describe the mood, adavu type, raga, tala, deity, or song name. The Cloud LLM will select an authentic composition and retrieve the audio.</p>
+        <div class="transcript">
+          <div id="welcome" class="welcome">
+            <h1>What shall we dance to?</h1>
+            <p>Describe a mood, adavu, raga, tala, or song. Each result is saved in the history on the left, named after the song.</p>
+          </div>
+          <div id="thread" class="thread" hidden></div>
+        </div>
 
-        <form id="curate-form">
+        <form id="curate-form" class="composer-dock">
           <label class="sr-only" for="prompt-input">Your Prompt</label>
           <div class="composer">
             <textarea id="prompt-input" rows="3" placeholder="e.g. An energetic Carnatic song in Adi Tala with good rhythmic tempo for Thattadavu..." required></textarea>
@@ -55,7 +75,6 @@
           </div>
         </form>
 
-        <!-- Progress Status Box -->
         <div id="status-box" class="status-box" hidden>
           <div class="status-spinner"></div>
           <div class="status-content">
@@ -120,7 +139,8 @@
 
     <section id="dance-view" hidden>
       <div class="dance-bar">
-        <button type="button" id="back-btn" class="back-btn">Back to prompt</button>
+        <button type="button" id="back-btn" class="back-btn">Back to chat</button>
+        <p id="dance-prompt" class="dance-prompt"></p>
       </div>
       <iframe id="dance-frame" title="Stick figure dance"></iframe>
     </section>
@@ -142,6 +162,7 @@
     <footer class="footer">
       <p>Bharatanatyam & Music Analysis Pipeline &copy; 2026. Powered by Google Gemini & yt-dlp.</p>
     </footer>
+  </div>
   </div>
 
   <script src="/static/js/main.js"></script>

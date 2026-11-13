@@ -22,6 +22,23 @@ Set your Google Gemini API key:
 export GEMINI_API_KEY="your-gemini-api-key"
 ```
 
+### Supabase chats
+Prompts, the song they produced, and the dance link are stored as chats. Audio files and the stick-figure player stay in `downloads/` and `output/` on this computer. Until Supabase is configured, those chats are written to `downloads/chats.json`.
+
+In the Supabase dashboard:
+
+1. Create a project.
+2. Open **SQL Editor**, paste `supabase/schema.sql`, and run it. That creates `chats` and `chat_turns`, and turns on row level security so the public anon key cannot read them.
+3. Open **Project Settings → API** and copy the project URL and the **service_role** key. The service role key bypasses row level security. Keep it on the server only. Do not put it in the browser, and do not commit it.
+4. Add both values to `.env` in this folder:
+
+```bash
+SUPABASE_URL="https://YOUR-PROJECT.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+```
+
+Restart `uv run app.py`. The sidebar note disappears once the app is talking to Supabase. Each prompt is appended to the open chat. **New chat** starts another thread. Opening a dance keeps that prompt at the top of the dance screen.
+
 ### 2. Run the Web UI (Flask)
 Start the web app:
 ```bash

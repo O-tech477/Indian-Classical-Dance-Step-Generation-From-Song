@@ -15,6 +15,7 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from modules.audio_service import download_song_audio
+from modules.chat_store import _title_from_prompt, build_chat_store
 from modules.instrument_service import predict_instruments
 from modules.llm_service import recommend_song
 from modules.storage_service import MusicLibrary
@@ -27,6 +28,7 @@ DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 DANCE_ROOT = ROOT / "output"
 ADAVUS_DIR = ROOT / "landmarks_json"
 library = MusicLibrary(storage_dir=str(DOWNLOADS_DIR))
+chat_store, CHAT_BACKEND, CHAT_STATUS = build_chat_store(DOWNLOADS_DIR)
 
 
 def run_dance_pipeline(audio_file: Path, tala_beats: int) -> str:
@@ -91,6 +93,45 @@ def get_instruments(filename):
         return jsonify({"success": False, "error": str(exc)}), 503
 
 
+@app.route("/api/chats/status", methods=["GET"])
+def chat_status():
+    """Tell the UI whether chats are stored in Supabase or on this computer."""
+    return jsonify({"success": True, "backend": CHAT_BACKEND, "message": CHAT_STATUS})
+
+
+@app.route("/api/chats", methods=["GET"])
+def list_chats():
+    """List saved chats, newest activity first."""
+    try:
+        return jsonify({"success": True, "chats": chat_store.list_chats(), "backend": CHAT_BACKEND})
+    except Exception as exc:
+        return jsonify({"success": False, "error": f"Could not load chats: {exc}"}), 500
+
+
+@app.route("/api/chats/<chat_id>", methods=["GET"])
+def get_chat(chat_id):
+    """Return one chat and its prompts."""
+    try:
+        chat = chat_store.get_chat(chat_id)
+    except Exception as exc:
+        return jsonify({"success": False, "error": f"Could not load chat: {exc}"}), 500
+    if not chat:
+        return jsonify({"success": False, "error": "Chat not found"}), 404
+    return jsonify({"success": True, "chat": chat})
+
+
+@app.route("/api/chats/<chat_id>", methods=["DELETE"])
+def delete_chat(chat_id):
+    """Delete a chat and its saved prompts."""
+    try:
+        deleted = chat_store.delete_chat(chat_id)
+    except Exception as exc:
+        return jsonify({"success": False, "error": f"Could not delete chat: {exc}"}), 500
+    if not deleted:
+        return jsonify({"success": False, "error": "Chat not found"}), 404
+    return jsonify({"success": True})
+
+
 @app.route("/api/recommend-and-download", methods=["POST"])
 def recommend_and_download():
     """Process user prompt: query Gemini LLM for recommendation,
@@ -100,11 +141,15 @@ def recommend_and_download():
     data = request.get_json() or {}
     user_prompt = data.get("prompt", "").strip()
     model = data.get("model", "openai/gpt-oss-20b")
+    chat_id = (data.get("chat_id") or "").strip()
 
     if not user_prompt:
         return jsonify({"success": False, "error": "Prompt cannot be empty"}), 400
 
     try:
+        if chat_id and not chat_store.get_chat(chat_id):
+            return jsonify({"success": False, "error": "Chat not found"}), 404
+
         # Step 1: Query Groq with browser search
         recommendation = recommend_song(user_prompt=user_prompt, model=model)
 
@@ -134,11 +179,21 @@ def recommend_and_download():
         saved_entry = library.add_song(record)
         dance_url = run_dance_pipeline(audio_file, saved_entry.get("tala_beats") or 8)
         saved_entry["dance_url"] = dance_url
+        saved_entry["prompt"] = user_prompt
+        saved_entry = library.add_song(saved_entry)
+
+        if not chat_id:
+            created = chat_store.create_chat(saved_entry.get("song_name") or _title_from_prompt(user_prompt))
+            chat_id = created["id"]
+
+        turn = chat_store.add_turn(chat_id, {**saved_entry, "prompt": user_prompt, "dance_url": dance_url})
 
         return jsonify({
             "success": True,
             "song": saved_entry,
             "dance_url": dance_url,
+            "chat": chat_store.get_chat(chat_id),
+            "turn": turn,
         })
 
     except ValueError as ve:

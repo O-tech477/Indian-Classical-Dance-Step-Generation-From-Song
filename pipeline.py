@@ -1272,6 +1272,11 @@ canvas{width:100%;display:block;background:var(--card);border:1px solid var(--li
 #fig{height:auto;aspect-ratio:3/2}
 #bar{height:44px;margin-top:8px;cursor:pointer}
 audio{width:100%;margin:10px 0}
+.instrument-panel{margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.instrument-heading{display:flex;justify-content:space-between;gap:8px;align-items:baseline;font-weight:600}
+.instrument-window,.instrument-note{color:var(--mut);font-size:12px}
+.instrument-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;min-height:24px}
+.instrument-chip{padding:3px 9px;border-radius:999px;background:var(--bg);border:1px solid var(--line);font-size:13px}
 .row{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:8px 0;color:var(--mut);font-size:13px}
 #now{font-size:16px;color:var(--fg)}
 #cnt{font-variant-numeric:tabular-nums}
@@ -1285,6 +1290,11 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--mut)}
 <canvas id="fig"></canvas>
 <canvas id="bar"></canvas>
 <audio id="au" controls preload="auto"></audio>
+<section id="instrument-panel" class="instrument-panel" aria-live="polite">
+<div class="instrument-heading"><span>Instruments playing now</span><span id="instrument-window" class="instrument-window"></span></div>
+<div id="instrument-list" class="instrument-list"><span class="instrument-note">Play the song to detect instruments.</span></div>
+<div id="instrument-note" class="instrument-note">Predictions update continuously from the saved MP3.</div>
+</section>
 <div class="row"><span id="now"></span><span id="cnt"></span></div>
 <div class="row">
 <label><input type="checkbox" id="clk"> beat clicks (accent on the sam)</label>
@@ -1514,6 +1524,9 @@ function frame(){
 function init(){
   layoutStage();
   au.src = encodeURI(T.audio_file);
+  au.addEventListener('play', refreshInstruments);
+  au.addEventListener('timeupdate', refreshInstruments);
+  setInterval(refreshInstruments, 5000);
   fit(fig); fit(bar);
   document.getElementById('dense').onchange = e => { useDense = e.target.checked; };
   bar.onclick = e => { au.currentTime = (e.offsetX/bar.clientWidth)*T.duration; };
@@ -1528,6 +1541,41 @@ function init(){
   document.getElementById('warns').textContent = T.warnings.join('  |  ');
   window.__player = {beatAt, poseFor, segIndexAt, fk, drawFigure};
   requestAnimationFrame(frame);
+}
+let instrumentRequestInFlight = false, lastInstrumentRequestAt = 0;
+async function refreshInstruments(){
+  if (au.paused || instrumentRequestInFlight || Date.now()-lastInstrumentRequestAt < 5000) return;
+  instrumentRequestInFlight = true;
+  lastInstrumentRequestAt = Date.now();
+  const note = document.getElementById('instrument-note');
+  try {
+    const url = '/api/instruments/' + encodeURIComponent(T.audio_file) + '?time=' + encodeURIComponent(au.currentTime || 0);
+    const response = await fetch(url);
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Instrument recognition failed.');
+    const list = document.getElementById('instrument-list');
+    list.replaceChildren();
+    const instruments = data.instruments || [];
+    if (!instruments.length) {
+      const empty = document.createElement('span');
+      empty.className = 'instrument-note';
+      empty.textContent = 'No clear instrument tags in this audio window.';
+      list.appendChild(empty);
+    } else {
+      instruments.forEach(item => {
+        const chip = document.createElement('span');
+        chip.className = 'instrument-chip';
+        chip.textContent = item.name;
+        list.appendChild(chip);
+      });
+    }
+    document.getElementById('instrument-window').textContent = data.window_start + 's–' + data.window_end + 's';
+    note.textContent = 'Likely instrument tags for the current 10-second audio window.';
+  } catch (error) {
+    note.textContent = 'Instrument recognition unavailable: ' + error.message;
+  } finally {
+    instrumentRequestInFlight = false;
+  }
 }
 init();
 </script></main></body></html>

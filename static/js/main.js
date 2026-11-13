@@ -30,7 +30,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const danceView = document.getElementById('dance-view');
   const danceFrame = document.getElementById('dance-frame');
   const backBtn = document.getElementById('back-btn');
-
   // Load library on start
   loadLibrary();
 
@@ -74,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function showDance(url) {
+    audioPlayer.pause();
     danceFrame.src = url;
     promptView.hidden = true;
     danceView.hidden = false;

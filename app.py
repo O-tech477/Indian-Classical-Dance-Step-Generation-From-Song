@@ -15,6 +15,7 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from modules.audio_service import download_song_audio
+from modules.instrument_service import predict_instruments
 from modules.llm_service import recommend_song
 from modules.storage_service import MusicLibrary
 
@@ -72,6 +73,22 @@ def get_songs():
     """List all downloaded songs in the library."""
     songs = library.list_songs()
     return jsonify({"success": True, "songs": songs})
+
+
+@app.route("/api/instruments/<path:filename>", methods=["GET"])
+def get_instruments(filename):
+    """Classify a short window around the current position in a downloaded song."""
+    if Path(filename).name != filename:
+        return jsonify({"success": False, "error": "Invalid audio filename"}), 400
+    audio_path = (DOWNLOADS_DIR / filename).resolve()
+    if not audio_path.is_relative_to(DOWNLOADS_DIR.resolve()) or not audio_path.is_file():
+        return jsonify({"success": False, "error": "Audio file not found"}), 404
+    try:
+        result = predict_instruments(audio_path, request.args.get("time", 0, type=float))
+        return jsonify({"success": True, **result})
+    except Exception as exc:
+        app.logger.exception("Instrument recognition failed")
+        return jsonify({"success": False, "error": str(exc)}), 503
 
 
 @app.route("/api/recommend-and-download", methods=["POST"])
@@ -153,5 +170,5 @@ def serve_audio(filename):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 6767))
     app.run(host="0.0.0.0", port=port, debug=True)

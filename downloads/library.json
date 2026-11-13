@@ -1,0 +1,68 @@
+[
+  {
+    "id": "1794599685777",
+    "song_name": "Shankarabharanam Varnam (Second Speed)",
+    "composer": "Muthuswami Dikshitar",
+    "raga": "Shankarabharanam",
+    "tala": "Adi Tala (8 beats)",
+    "tala_beats": 8,
+    "youtube_url": "https://www.youtube.com/watch?v=pGmIjeeHB0Y",
+    "description": "This fast\u2011paced varnam in Shankarabharanam showcases rapid rhythmic cycles in Adi tala, making it ideal for energetic Bharatanatyam Nritta.",
+    "filename": "Shankarabharanam_Varnam_(Second_Speed).mp3",
+    "audio_path": "/home/O-tech477/Desktop/BharatyanatiyamAndMusic/downloads/Shankarabharanam_Varnam_(Second_Speed).mp3",
+    "created_at": "2026-11-14 01:24:45"
+  },
+  {
+    "id": "1794596824751",
+    "song_name": "Karnam",
+    "composer": "Thyagaraja",
+    "raga": "Kalyani",
+    "tala": "Adi Tala (8 beats)",
+    "tala_beats": 8,
+    "youtube_url": "https://www.youtube.com/watch?v=G-NsFtUsHIs",
+    "description": "Karnam is a fast\u2011paced Thyagaraja kriti in Kalyani that showcases vigorous rhythmic play, making it ideal for an energetic Carnatic dance performance.",
+    "filename": "Karnam.mp3",
+    "audio_path": "/home/O-tech477/Desktop/BharatyanatiyamAndMusic/downloads/Karnam.mp3",
+    "created_at": "2026-11-14 00:37:04"
+  },
+  {
+    "id": "1794594148693",
+    "song_name": "Raghuvamsa",
+    "composer": "Patnam Subramanya Iyer",
+    "raga": "Raghuvamsa",
+    "tala": "Adi Tala (8 beats)",
+    "tala_beats": 8,
+    "youtube_url": "https://youtu.be/9ZxAYywaDnI",
+    "description": "A classic Carnatic kriti in the Raghuvamsa raga, rendered in the standard 8-beat Adi tala, making it ideal for authentic classical performances.",
+    "filename": "Raghuvamsa.mp3",
+    "audio_path": "/home/O-tech477/Desktop/BharatyanatiyamAndMusic/downloads/Raghuvamsa.mp3",
+    "created_at": "2026-11-13 23:52:28"
+  },
+  {
+    "id": "1794593243884",
+    "song_name": "Vatapi Ganapatim",
+    "composer": "Muthuswami Dikshitar",
+    "raga": "Hamsadhwani",
+    "tala": "Adi Tala (8 beats)",
+    "tala_beats": 8,
+    "youtube_url": "https://www.youtube.com/watch?v=J32R5w_340g",
+    "description": "A classic auspicious invocation composition dedicated to Lord Ganesha, traditionally performed at the beginning of Carnatic music concerts and Bharatanatyam dance recitals.",
+    "filename": "Vatapi_Ganapatim.mp3",
+    "audio_path": "/home/O-tech477/Desktop/BharatyanatiyamAndMusic/downloads/Vatapi_Ganapatim.mp3",
+    "created_at": "2026-11-13 23:37:23"
+  },
+  {
+    "id": "sample-ganapati",
+    "song_name": "Ganapati Tala",
+    "composer": "Traditional",
+    "raga": "Hamsadhwani",
+    "tala": "Adi Tala (8 beats)",
+    "tala_beats": 8,
+    "youtube_url": "https://www.youtube.com/watch?v=sample",
+    "description": "Foundational Ganapati rhythmic invocation in Adi Tala, ideal for Nritta and introductory adavu practice.",
+    "filename": "GanapatiTala.mp3",
+    "audio_path": "/home/O-tech477/Desktop/BharatyanatiyamAndMusic/GanapatiTala.mp3",
+    "audio_url": "/audio/GanapatiTala.mp3",
+    "created_at": "2026-11-13 22:30:00"
+  }
+]

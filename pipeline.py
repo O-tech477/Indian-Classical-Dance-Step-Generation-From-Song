@@ -1025,31 +1025,16 @@ PLAYER = r"""<!DOCTYPE html>
 @media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecece6;--mut:#9a9a92;--line:#34342f;--acc:#fb923c;--card:#1f1f1c;color-scheme:dark}}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif;padding:16px}
 main{max-width:720px;margin:0 auto}
-h1{font-size:18px;margin:0 0 8px}
 canvas{width:100%;display:block;background:var(--card);border:1px solid var(--line);border-radius:10px}
 #fig{height:auto;aspect-ratio:3/2}
 #bar{height:44px;margin-top:8px;cursor:pointer}
 audio{width:100%;margin:10px 0}
-.row{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:8px 0;color:var(--mut);font-size:13px}
-#now{font-size:16px;color:var(--fg)}
-#cnt{font-variant-numeric:tabular-nums}
-.sam{color:var(--acc);font-weight:600}
-details{margin-top:10px}summary{cursor:pointer;color:var(--mut)}
-#list{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
-#list button{font:12px system-ui;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 7px;cursor:pointer}
-.warn{color:var(--acc);font-size:13px}
+#now{font-size:16px;color:var(--fg);margin:8px 0 0}
 </style></head><body><main>
-<h1>__TITLE__</h1>
 <canvas id="fig"></canvas>
-<canvas id="bar"></canvas>
 <audio id="au" controls preload="auto"></audio>
-<div class="row"><span id="now"></span><span id="cnt"></span></div>
-<div class="row">
-<label><input type="checkbox" id="clk"> beat clicks (accent on the sam)</label>
-<label><input type="checkbox" id="dense" checked> smooth motion (uses the recorded cycle when available)</label>
-</div>
-<div id="warns" class="warn"></div>
-<details><summary>All steps (click to jump)</summary><div id="list"></div></details>
+<canvas id="bar"></canvas>
+<div id="now"></div>
 <script>
 const T = __TIMELINE__;
 const BONES = ["sp","lua","lfa","rua","rfa","lt","ls","rt","rs"];
@@ -1206,40 +1191,18 @@ function drawBar(t){
   }
   bx.fillStyle = css('--fg'); bx.fillRect(Math.min(au.currentTime,D)/D*W - dpr, 0, 2*dpr, H);
 }
-let ac = null, lastInt = -1;
-function click(accent){
-  if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
-  const o = ac.createOscillator(), g = ac.createGain();
-  o.frequency.value = accent ? 1500 : 900; g.gain.value = .12;
-  g.gain.exponentialRampToValueAtTime(.001, ac.currentTime+.06);
-  o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+.07);
-}
 function frame(){
-  const t = au.currentTime, b = beatAt(t), bi = Math.floor(b);
+  const t = au.currentTime, b = beatAt(t);
   drawFigure(poseFor(b)); drawBar(t);
   const i = segIndexAt(b), s = i >= 0 ? segs[i] : null;
   document.getElementById('now').textContent = s && b < s.start_beat + s.n_beats ? s.adavu + '  x' + s.speed : '-';
-  const rel = bi - T.first_sam_index, pos = ((rel % tala) + tala) % tala + 1;
-  const cnt = document.getElementById('cnt');
-  cnt.textContent = 'beat count ' + pos + ' / ' + tala; cnt.className = pos === 1 ? 'sam' : '';
-  if (bi !== lastInt) { lastInt = bi; if (!au.paused && document.getElementById('clk').checked) click(pos === 1); }
   requestAnimationFrame(frame);
 }
 function init(){
   layoutStage();
   au.src = encodeURI(T.audio_file);
   fit(fig); fit(bar);
-  document.getElementById('dense').onchange = e => { useDense = e.target.checked; };
   bar.onclick = e => { au.currentTime = (e.offsetX/bar.clientWidth)*T.duration; };
-  const list = document.getElementById('list');
-  segs.forEach(s => {
-    const btn = document.createElement('button');
-    btn.textContent = s.start_time.toFixed(1) + 's  ' + s.adavu + ' x' + s.speed;
-    btn.style.borderLeft = '4px solid hsl(' + hue(s.adavu) + ',55%,55%)';
-    btn.onclick = () => { au.currentTime = s.start_time; };
-    list.appendChild(btn);
-  });
-  document.getElementById('warns').textContent = T.warnings.join('  |  ');
   window.__player = {beatAt, poseFor, segIndexAt, fk, drawFigure};
   requestAnimationFrame(frame);
 }

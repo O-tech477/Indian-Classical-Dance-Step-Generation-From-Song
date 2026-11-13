@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bharatanatyam AI Music Curator</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-group">
+        <span class="logo-icon">🪷</span>
+        <div>
+          <h1>Bharatanatyam AI Music Curator</h1>
+          <p class="subtitle">AI-guided Indian classical song discovery, YouTube audio extraction, and dance accompaniment storage</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="main-grid" id="prompt-view">
+      <!-- Left Column: Input and Curation Controls -->
+      <section class="card curate-section">
+        <h2 class="section-title">Curate New Dance Music</h2>
+        <p class="section-desc">Describe the mood, adavu type, raga, tala, deity, or song name. The Cloud LLM will select an authentic composition and retrieve the audio.</p>
+
+        <form id="curate-form">
+          <label class="sr-only" for="prompt-input">Your Prompt</label>
+          <div class="composer">
+            <textarea id="prompt-input" rows="3" placeholder="e.g. An energetic Carnatic song in Adi Tala with good rhythmic tempo for Thattadavu..." required></textarea>
+            <div class="composer-bar">
+              <label class="sr-only" for="model-select">Groq Model</label>
+              <select id="model-select" class="composer-select">
+                <option value="openai/gpt-oss-20b" selected>Groq GPT-OSS 20B</option>
+              </select>
+              <button type="submit" id="submit-btn" class="send-btn" aria-label="Curate and download">
+                <svg class="send-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                  <path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="spinner" id="btn-spinner" hidden></span>
+              </button>
+            </div>
+          </div>
+
+          <div class="chips-container">
+            <button type="button" class="chip" data-prompt="Energetic Adi tala Carnatic composition suitable for fast Thattadavu practice">Energetic Adi Tala</button>
+            <button type="button" class="chip" data-prompt="Vatapi Ganapatim in Hamsadhwani raga, Adi tala">Vatapi Ganapatim</button>
+            <button type="button" class="chip" data-prompt="Graceful Rupaka tala song for Natta and Paraval adavus">Rupaka Tala Graceful</button>
+            <button type="button" class="chip" data-prompt="Rhythmic Jathi or Tillana in Adi tala with crisp beats">Tillana in Adi Tala</button>
+          </div>
+        </form>
+
+        <!-- Progress Status Box -->
+        <div id="status-box" class="status-box" hidden>
+          <div class="status-spinner"></div>
+          <div class="status-content">
+            <h4 id="status-title">Processing Request...</h4>
+            <p id="status-detail">Searching with Groq browser search...</p>
+          </div>
+        </div>
+
+        <!-- Error Notification -->
+        <div id="error-box" class="alert alert-error" hidden></div>
+      </section>
+
+      <!-- Right Column: Result & Player Card -->
+      <section class="card result-section" id="result-section">
+        <h2 class="section-title">Active Song & Player</h2>
+        
+        <div id="empty-state" class="empty-state">
+          <div class="empty-icon">🎵</div>
+          <p>No song loaded yet. Submit a prompt to curate and download a classical track!</p>
+        </div>
+
+        <div id="song-card" class="song-card" hidden>
+          <div class="song-header">
+            <div>
+              <h3 id="song-title" class="song-title">Song Title</h3>
+              <p id="song-composer" class="song-composer">Composer / Artist</p>
+            </div>
+            <div class="badges">
+              <span id="raga-badge" class="badge badge-raga">Raga: -</span>
+              <span id="tala-badge" class="badge badge-tala">Tala: -</span>
+            </div>
+          </div>
+
+          <p id="song-desc" class="song-desc"></p>
+
+          <!-- Audio Player -->
+          <div class="player-wrapper">
+            <audio id="audio-player" controls preload="metadata"></audio>
+            <div class="player-links">
+              <a id="yt-source-link" href="#" target="_blank" rel="noopener noreferrer" class="link-yt">
+                📺 Open Source YouTube Recording
+              </a>
+              <span id="file-size" class="file-size"></span>
+            </div>
+          </div>
+
+          <!-- Pipeline Next Step Box -->
+          <div class="pipeline-box">
+            <div class="pipeline-header">
+              <span class="pipeline-icon">⚡</span>
+              <strong>Ready for Stick-Figure Choreography</strong>
+            </div>
+            <p class="pipeline-hint">Run the Bharatanatyam adavu pipeline with this song:</p>
+            <div class="code-snippet">
+              <code id="pipeline-code">uv run pipeline.py ...</code>
+              <button type="button" id="copy-cmd-btn" class="btn-copy">Copy</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <section id="dance-view" hidden>
+      <div class="dance-bar">
+        <button type="button" id="back-btn" class="back-btn">Back to prompt</button>
+      </div>
+      <iframe id="dance-frame" title="Stick figure dance"></iframe>
+    </section>
+
+    <!-- Downloaded Library Section -->
+    <section class="card library-section">
+      <div class="library-header">
+        <h2 class="section-title">Stored Music Library</h2>
+        <button id="refresh-lib-btn" class="btn btn-secondary btn-sm">↻ Refresh</button>
+      </div>
+      <p class="section-desc">Locally stored audio tracks ready for the dance pipeline in <code>downloads/</code>.</p>
+
+      <div id="library-list" class="library-grid">
+        <p class="loading-text">Loading library...</p>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>Bharatanatyam & Music Analysis Pipeline &copy; 2026. Powered by Google Gemini & yt-dlp.</p>
+    </footer>
+  </div>
+
+  <script src="/static/js/main.js"></script>
+</body>
+</html>

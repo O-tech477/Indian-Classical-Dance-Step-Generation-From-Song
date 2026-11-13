@@ -34,9 +34,10 @@ import argparse
 import html
 import json
 import re
-import shutil
 import sys
 from pathlib import Path
+
+from modules.audio_service import MAX_SONG_SECONDS, cap_song
 
 import numpy as np
 import librosa
@@ -974,7 +975,11 @@ def main():
     speeds = [float(s) for s in a.speeds.split(",")]
 
     log("1/3 analysing the song ...")
+    song = cap_song(song, out / song.name, MAX_SONG_SECONDS)
     ana, bt, onsets = analyze(song, a.tala, a.backend, a.sam_beat)
+    if ana["duration"] > MAX_SONG_SECONDS:
+        ana["duration"] = MAX_SONG_SECONDS
+        ana["warnings"].append("trimmed to the first 2 minutes")
     (out / "analysis.json").write_text(json.dumps(ana, indent=1))
     log(f"    {len(bt)} beats, ~{ana['bpm_median']} bpm, backend {ana['backend']}, first sam = beat {ana['first_sam_index']}")
 
@@ -1008,8 +1013,6 @@ def main():
     log(f"    {len(segments)} steps from {len(used)} adavus, covering {total_beats} beats")
 
     log("3/3 writing the player ...")
-    if song.resolve() != (out / song.name).resolve():
-        shutil.copy(song, out / song.name)
     page = PLAYER.replace("__TIMELINE__", json.dumps(timeline, separators=(",", ":")).replace("</", "<\\/"))
     page = page.replace("__TITLE__", html.escape(song.stem))
     (out / "index.html").write_text(page)

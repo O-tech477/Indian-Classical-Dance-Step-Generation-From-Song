@@ -16,12 +16,16 @@ Usage:
   python analyze_song.py song.mp3 -o song.json --tala 8 --check song_clicks.wav
   (listen to the click file; if the accent is on the wrong beat, rerun with --sam-beat N)
 """
+import atexit
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from modules.audio_service import MAX_SONG_SECONDS, cap_song, probe_duration
 
 import numpy as np
 import librosa
@@ -174,7 +178,14 @@ def main():
     out_json = a.out or str(path.with_suffix(".json"))
     warnings = []
 
-    y, sr = librosa.load(str(path), sr=SR, mono=True)
+    work = Path(tempfile.mkdtemp(prefix="song-cap-"))
+    atexit.register(shutil.rmtree, work, True)
+    full_length = probe_duration(path)
+    path = cap_song(path, work / path.name, MAX_SONG_SECONDS)
+    if full_length is None or full_length > MAX_SONG_SECONDS + 0.05:
+        warnings.append("trimmed to the first 2 minutes")
+
+    y, sr = librosa.load(str(path), sr=SR, mono=True, duration=MAX_SONG_SECONDS)
 
     # stems
     vocals_rms = rest_rms = None

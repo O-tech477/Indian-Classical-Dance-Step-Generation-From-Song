@@ -1,5 +1,18 @@
 [
   {
+    "id": "1794600108169",
+    "song_name": "Padam \u2013 Raga Khamas",
+    "composer": "Lalgudi Jayaraman",
+    "raga": "Khamas",
+    "tala": "Adi Tala (8 beats)",
+    "tala_beats": 8,
+    "youtube_url": "https://www.youtube.com/watch?v=example",
+    "description": "A slow, lyrical padam in Raga Khamas, ideal for a gentle, expressive Bharatanatyam performance.",
+    "filename": "Padam_\u2013_Raga_Khamas.mp3",
+    "audio_path": "/home/O-tech477/Desktop/BharatyanatiyamAndMusic/downloads/Padam_\u2013_Raga_Khamas.mp3",
+    "created_at": "2026-11-14 01:31:48"
+  },
+  {
     "id": "1794599685777",
     "song_name": "Shankarabharanam Varnam (Second Speed)",
     "composer": "Muthuswami Dikshitar",

@@ -34,6 +34,7 @@ import argparse
 import html
 import json
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -78,6 +79,78 @@ def guess_sam_phase(y, sr, bt, tala):
     return int(np.argmax([vals[p::tala].mean() if len(vals[p::tala]) else 0.0 for p in range(tala)]))
 
 
+def extract_audio_features(y, sr, bt, tala, first_sam):
+    """Extract harmonic/percussive stems, continuous pitch contour, and macro-sections.
+
+    100% computed on the fly from the audio waveform with librosa/scipy (no JSON lookup needed).
+    """
+    # 1. Harmonic vs Percussive separation (HPSS)
+    y_harm, y_perc = librosa.effects.hpss(y)
+    perc_onsets = librosa.onset.onset_detect(y=y_perc, sr=sr, hop_length=HOP, units="time")
+    harm_rms = librosa.feature.rms(y=y_harm, hop_length=HOP)[0]
+    perc_rms = librosa.feature.rms(y=y_perc, hop_length=HOP)[0]
+
+    # 2. Continuous Pitch Tracking (f0)
+    try:
+        f0 = librosa.yin(y_harm, fmin=65, fmax=800, sr=sr, hop_length=HOP)
+        valid = np.isfinite(f0) & (f0 > 70) & (f0 < 750)
+        if np.any(valid):
+            med = float(np.median(f0[valid]))
+            std = float(np.std(f0[valid])) or 50.0
+            norm_f0 = np.where(valid, (f0 - med) / std, 0.0)
+            norm_f0 = np.clip(norm_f0, -1.8, 1.8)
+        else:
+            norm_f0 = np.zeros(len(f0))
+    except Exception as e:
+        log("pitch tracking fallback:", e)
+        norm_f0 = np.zeros(max(1, int(len(y) / HOP)))
+
+    # Sample normalized pitch at each beat
+    beat_frames = np.clip(librosa.time_to_frames(bt, sr=sr, hop_length=HOP), 0, len(norm_f0) - 1)
+    pitch_per_beat = [round(float(norm_f0[f]), 3) for f in beat_frames]
+
+    # 3. Macro-Sectioning (Unsupervised Pallavi / Anupallavi / Charanam)
+    starts = list(range(first_sam, len(bt) - tala + 1, tala))
+    sections = []
+    if len(starts) >= 4:
+        try:
+            chroma = librosa.feature.chroma_cqt(y=y_harm, sr=sr, hop_length=HOP)
+            mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13, hop_length=HOP)
+            feat = np.vstack([chroma, mfcc])
+            cycle_feats = []
+            for s in starts:
+                t0 = bt[s]
+                t1 = bt[s + tala] if s + tala < len(bt) else bt[-1]
+                fr0 = int(librosa.time_to_frames(t0, sr=sr, hop_length=HOP))
+                fr1 = max(fr0 + 1, int(librosa.time_to_frames(t1, sr=sr, hop_length=HOP)))
+                cycle_feats.append(feat[:, fr0:min(feat.shape[1], fr1)].mean(axis=1))
+            X_c = np.array(cycle_feats).T
+            k_sec = max(2, min(4, len(starts) // 4))
+            b_idx = [int(b) for b in librosa.segment.agglomerative(X_c, k=k_sec)]
+            if 0 not in b_idx:
+                b_idx = [0] + b_idx
+            b_idx.append(len(starts))
+            for si in range(len(b_idx) - 1):
+                c0, c1 = b_idx[si], b_idx[si + 1]
+                sb = starts[c0]
+                eb = starts[c1 - 1] + tala if c1 < len(starts) else len(bt)
+                label = "pallavi" if si == 0 else ("anupallavi" if si == 1 else "charanam")
+                sections.append({"start_beat": sb, "end_beat": eb, "label": label})
+        except Exception as e:
+            log("section segmentation fallback:", e)
+            sections = [{"start_beat": first_sam, "end_beat": len(bt), "label": "pallavi"}]
+    else:
+        sections = [{"start_beat": first_sam, "end_beat": len(bt), "label": "pallavi"}]
+
+    return {
+        "perc_onsets": perc_onsets,
+        "harm_rms": harm_rms,
+        "perc_rms": perc_rms,
+        "norm_f0": norm_f0,
+        "pitch_per_beat": pitch_per_beat,
+        "sections": sections,
+    }
+
 def analyze(path, tala, backend, sam_beat):
     y, sr = librosa.load(str(path), sr=SR, mono=True)
     bt, db, used = get_beats(path, y, sr, backend)
@@ -104,14 +177,18 @@ def analyze(path, tala, backend, sam_beat):
     drift = float(np.max(np.abs(bpm - med)) / med)
     if drift > 0.10:
         warnings.append(f"tempo drifts {drift:.0%} from the median: the plan follows the real beats, but check the clicks")
-    onsets = librosa.onset.onset_detect(y=y, sr=sr, hop_length=HOP, units="time")
+
+    extra_features = extract_audio_features(y, sr, bt, tala, first)
+    # Prefer percussive transients for sharper rhythmic footwork, fallback to general onsets
+    onsets = extra_features["perc_onsets"] if len(extra_features["perc_onsets"]) > 8 else librosa.onset.onset_detect(y=y, sr=sr, hop_length=HOP, units="time")
+
     return {
         "file": Path(path).name, "backend": used, "tala_beats": int(tala), "first_sam_index": int(first),
         "grid_confidence": None if conf is None else round(conf, 3), "bpm_median": round(med, 2),
         "duration": round(len(y) / sr, 2), "warnings": warnings,
+        "sections": extra_features["sections"],
         "beats": [{"t": round(float(t), 3), "pos": int(p), "bpm": round(float(b), 1)} for t, p, b in zip(bt, pos, bpm)],
-    }, bt, onsets
-
+    }, bt, onsets, extra_features
 
 def load(path):
     d = json.loads(Path(path).read_text())
@@ -422,6 +499,72 @@ def settle_angles(C):
     return out
 
 
+def enforce_anatomical_limits(C):
+    """Enforce human biomechanical hinge constraints on knees and elbows.
+
+    In 2D frontal projection of Bharatanatyam (Araimandi stance):
+      - Left thigh (lt=5) to left shin (ls=6): knee flexes inward towards body midline.
+        Inward flexion delta in [-5°, 150°]. Clamps backward hyperextension / inverted knee.
+      - Right thigh (rt=7) to right shin (rs=8): knee flexes inward towards body midline.
+        Inward flexion delta in [-150°, 5°]. Clamps backward hyperextension.
+      - Elbows: forearm flexion cannot invert past 160° relative to upper arm.
+    """
+    out = np.array(C, float, copy=True)
+    for i in range(len(out)):
+        # Left leg: lt=5, ls=6
+        dl = (out[i, 6] - out[i, 5] + 180.0) % 360.0 - 180.0
+        if dl < -5.0:
+            out[i, 6] += (-5.0 - dl)
+        elif dl > 150.0:
+            out[i, 6] += (150.0 - dl)
+
+        # Right leg: rt=7, rs=8
+        dr = (out[i, 8] - out[i, 7] + 180.0) % 360.0 - 180.0
+        if dr > 5.0:
+            out[i, 8] += (5.0 - dr)
+        elif dr < -150.0:
+            out[i, 8] += (-150.0 - dr)
+
+        # Left elbow: lua=1, lfa=2
+        del_l = (out[i, 2] - out[i, 1] + 180.0) % 360.0 - 180.0
+        if abs(del_l) > 160.0:
+            out[i, 2] += (np.sign(del_l) * 160.0 - del_l)
+
+        # Right elbow: rua=3, rfa=4
+        del_r = (out[i, 4] - out[i, 3] + 180.0) % 360.0 - 180.0
+        if abs(del_r) > 160.0:
+            out[i, 4] += (np.sign(del_r) * 160.0 - del_r)
+    return out
+
+
+def enforce_pose_limits(p):
+    """Enforce anatomical limits on a single pose dictionary."""
+    if not isinstance(p, dict):
+        return p
+    r = dict(p)
+    if "lt" in r and "ls" in r:
+        dl = (r["ls"] - r["lt"] + 180.0) % 360.0 - 180.0
+        if dl < -5.0:
+            r["ls"] += (-5.0 - dl)
+        elif dl > 150.0:
+            r["ls"] += (150.0 - dl)
+    if "rt" in r and "rs" in r:
+        dr = (r["rs"] - r["rt"] + 180.0) % 360.0 - 180.0
+        if dr > 5.0:
+            r["rs"] += (5.0 - dr)
+        elif dr < -150.0:
+            r["rs"] += (-150.0 - dr)
+    if "lua" in r and "lfa" in r:
+        del_l = (r["lfa"] - r["lua"] + 180.0) % 360.0 - 180.0
+        if abs(del_l) > 160.0:
+            r["lfa"] += (np.sign(del_l) * 160.0 - del_l)
+    if "rua" in r and "rfa" in r:
+        del_r = (r["rfa"] - r["rua"] + 180.0) % 360.0 - 180.0
+        if abs(del_r) > 160.0:
+            r["rfa"] += (np.sign(del_r) * 160.0 - del_r)
+    return r
+
+
 def aligned_root(R, starts, Pf):
     """Stage path for one cycle, phase-locked to the angle repetitions.
 
@@ -607,6 +750,7 @@ def build(path, bpm, ov, min_gap=0.2):
         warns.append("a limb spun in the repeated cycle: replaced it with one clean pass")
     C = settle_angles(C)
     C, spun = fold_spins(C)
+    C = enforce_anatomical_limits(C)
     if spun:
         warns.append("folded a spun track on " + ", ".join(spun))
     Rc = aligned_root(Ra, starts, Pf)
@@ -648,7 +792,6 @@ def build(path, bpm, ov, min_gap=0.2):
         "warnings": warns,
     }
     return out
-
 
 
 def build_vocab_from_landmarks(lm_dir, out_dir, clip_bpm):
@@ -699,11 +842,16 @@ def load_vocab(adavu_dir, default_beats):
             else:
                 warns.append(f"{name}: skipped, no length in beats (pass --default-beats or --clip-bpm)")
                 continue
-        entry = {"cycle_beats": float(cb), "keys": v["keys"]}
+        keys_clean = [[u, enforce_pose_limits(pose)] for u, pose in v["keys"]]
+        entry = {"cycle_beats": float(cb), "keys": keys_clean}
         full = base / f"{name}.adavu.json"
         if full.exists():
             full_o = json.loads(full.read_text())
-            entry["cycle"] = full_o.get("cycle")
+            cyc = full_o.get("cycle")
+            if cyc and "sp" in cyc:
+                arr = np.column_stack([cyc[b] for b in BONES])
+                arr = enforce_anatomical_limits(arr)
+                entry["cycle"] = {b: [round(float(x), 2) for x in arr[:, idx]] for idx, b in enumerate(BONES)}
             if full_o.get("root"):
                 entry["root"] = full_o["root"]
         vocab[name] = entry
@@ -796,12 +944,49 @@ def _phrase_beats(tala, cycle_beats, speeds):
     return fallback or tala
 
 
-def plan(vocab, first_sam, total_beats, bt, onsets, speeds, min_sec, warnings, tala):
+def pose_trans_distance(name1, name2, vocab):
+    """Angular mismatch in degrees between end pose of name1 and start pose of name2."""
+    if not name1 or not name2 or name1 not in vocab or name2 not in vocab:
+        return 0.0
+    cyc1 = vocab[name1].get("cycle")
+    cyc2 = vocab[name2].get("cycle")
+    if not cyc1 or not cyc2:
+        return 0.0
+    try:
+        p1 = np.array([cyc1[b][-1] for b in BONES if b in cyc1], float)
+        p2 = np.array([cyc2[b][0] for b in BONES if b in cyc2], float)
+        if len(p1) == 0 or len(p1) != len(p2):
+            return 0.0
+        d = np.abs(p1 - p2)
+        d = np.minimum(d, 360.0 - d)
+        return float(d.mean())
+    except Exception:
+        return 0.0
+
+
+def spatial_drift_cost(name, reps, current_x, vocab):
+    """Penalize steps that push dancer past stage boundary; reward returning toward center."""
+    root = vocab[name].get("root")
+    if not root or not root.get("shift"):
+        return 0.0
+    shift_x = float(root["shift"][0]) * reps
+    proj_x = current_x + shift_x
+    if abs(proj_x) > 1.2:
+        return 2.5 * (abs(proj_x) - 1.2)
+    return -0.2 * (abs(current_x) - abs(proj_x))
+
+
+def plan(vocab, first_sam, total_beats, bt, onsets, speeds, min_sec, warnings, tala, extra_features=None):
     """One adavu family per tala phrase, repeated to fill it. The next phrase changes family.
 
     Resting poses are not compared: every clip is stored so it ends where it starts, and that
     comparison is what made two similar stances alternate for the whole song.
     """
+    extra_features = extra_features or {}
+    harm_rms = extra_features.get("harm_rms")
+    perc_rms = extra_features.get("perc_rms")
+    sections = extra_features.get("sections") or []
+
     families = {}
     for name in sorted(vocab):
         families.setdefault(family_of(name), []).append(name)
@@ -869,12 +1054,33 @@ def plan(vocab, first_sam, total_beats, bt, onsets, speeds, min_sec, warnings, t
     steps = []
     summary = []
     beat = 0
+    stage_x = 0.0
+    last_name = None
+
     for pi, pb in enumerate(chunks):
         t0, t1 = beat_time(beat), beat_time(beat + pb)
         dens_n = (dens[pi] - dlo) / dspan
         pref = 1 if dens[pi] < 1.2 else 2 if dens[pi] < 3.0 else 4
         pos = pi / max(1, len(chunks) - 1)
         last = pi == len(chunks) - 1
+
+        # Determine current section (Pallavi / Anupallavi / Charanam)
+        curr_sec = "pallavi"
+        curr_beat_abs = first_sam + beat
+        for sec in sections:
+            if sec["start_beat"] <= curr_beat_abs <= sec["end_beat"]:
+                curr_sec = sec["label"]
+                break
+
+        # Compute harmonic vs percussive ratio for this phrase
+        perc_ratio = 0.5
+        if harm_rms is not None and perc_rms is not None and len(harm_rms) > 0 and len(perc_rms) > 0:
+            fr0 = int(librosa.time_to_frames(t0, sr=SR, hop_length=HOP))
+            fr1 = max(fr0 + 1, int(librosa.time_to_frames(t1, sr=SR, hop_length=HOP)))
+            h_val = float(harm_rms[fr0:min(len(harm_rms), fr1)].mean()) if fr0 < len(harm_rms) else 0.0
+            p_val = float(perc_rms[fr0:min(len(perc_rms), fr1)].mean()) if fr0 < len(perc_rms) else 0.0
+            if (h_val + p_val) > 1e-6:
+                perc_ratio = p_val / (h_val + p_val)
 
         def feasible(name):
             found = []
@@ -896,16 +1102,23 @@ def plan(vocab, first_sam, total_beats, bt, onsets, speeds, min_sec, warnings, t
         def choose_clip(fam):
             names = families[fam]
             start = cursor[fam]
-            best = None
+            candidates = []
             for j in range(len(names)):
                 name = names[(start + j) % len(names)]
                 opts = feasible(name)
                 if not opts:
                     continue
-                k, reps, dq = min(opts, key=lambda o: (abs(np.log2(o[0] / pref)), o[0]))
-                best = (name, k, reps, dq, (start + j + 1) % len(names))
-                break
-            return best
+                for k, reps, dq in opts:
+                    tempo_fit = abs(np.log2(k / pref))
+                    trans_fit = 0.03 * pose_trans_distance(last_name, name, vocab)
+                    spat_fit = spatial_drift_cost(name, reps, stage_x, vocab)
+                    total_fit = tempo_fit + trans_fit + spat_fit
+                    candidates.append((total_fit, name, k, reps, dq, (start + j + 1) % len(names)))
+            if candidates:
+                candidates.sort(key=lambda c: c[0])
+                _, b_name, b_k, b_reps, b_dq, b_nxt = candidates[0]
+                return (b_name, b_k, b_reps, b_dq, b_nxt)
+            return None
 
         if last and "teermanam" in families:
             order = ["teermanam"]
@@ -918,10 +1131,23 @@ def plan(vocab, first_sam, total_beats, bt, onsets, speeds, min_sec, warnings, t
                 if recent and fam == recent[-1]:
                     return 1e6
                 # Do not return to a family until the others have been used.
-                # The last few phrases also stay out of the pool, so two steps cannot trade off.
                 recency = 2.5 if fam in recent[-3:] else 0.0
                 arc = _ARC.get(fam, _ARC["other"])
-                return recency + 1.8 * used_n[fam] + abs(energy[fam] - dens_n) + 0.7 * abs(arc - pos)
+                base = recency + 1.8 * used_n[fam] + abs(energy[fam] - dens_n) + 0.7 * abs(arc - pos)
+
+                # Section-aware preference
+                if curr_sec == "pallavi" and fam in ("tatta", "natta", "tattimettu"):
+                    base -= 0.6
+                elif curr_sec == "anupallavi" and fam in ("kuditta", "sarukkal", "paraval", "utplavana"):
+                    base -= 0.6
+
+                # Percussive vs harmonic stem preference
+                if perc_ratio > 0.55 and fam in ("tattimettu", "kuthu", "dhalanku", "thahatha"):
+                    base -= 0.4
+                elif perc_ratio < 0.45 and fam in ("natta", "paraval", "sarukkal"):
+                    base -= 0.4
+
+                return base
             order = sorted(body, key=cost)
 
         picked = None
@@ -944,6 +1170,12 @@ def plan(vocab, first_sam, total_beats, bt, onsets, speeds, min_sec, warnings, t
             steps.append((pos_q, {"n": name, "k": k, "dq": dq}))
             pos_q += dq
         beat = pos_q / Q
+
+        root_data = vocab[name].get("root")
+        if root_data and root_data.get("shift"):
+            stage_x = np.clip(stage_x + float(root_data["shift"][0]) * reps, -STAGE_X, STAGE_X)
+        last_name = name
+
         summary.append(f"{name} x{k:g}×{reps}")
 
     if "teermanam" in families and recent[-1] != "teermanam":
@@ -976,12 +1208,15 @@ def main():
 
     log("1/3 analysing the song ...")
     song = cap_song(song, out / song.name, MAX_SONG_SECONDS)
-    ana, bt, onsets = analyze(song, a.tala, a.backend, a.sam_beat)
+    ana, bt, onsets, extra_features = analyze(song, a.tala, a.backend, a.sam_beat)
     if ana["duration"] > MAX_SONG_SECONDS:
         ana["duration"] = MAX_SONG_SECONDS
         ana["warnings"].append("trimmed to the first 2 minutes")
     (out / "analysis.json").write_text(json.dumps(ana, indent=1))
     log(f"    {len(bt)} beats, ~{ana['bpm_median']} bpm, backend {ana['backend']}, first sam = beat {ana['first_sam_index']}")
+    if ana.get("sections"):
+        sec_str = " | ".join(f"{s['label']} (beats {s['start_beat']}-{s['end_beat']})" for s in ana["sections"])
+        log(f"    detected sections: {sec_str}")
 
     log("2/3 planning adavus ...")
     vocab, vwarn = load_vocab(resolve_adavus(a.adavus, out, a.clip_bpm), a.default_beats)
@@ -993,7 +1228,7 @@ def main():
     if total_beats < a.tala:
         sys.exit("the song has less than one full cycle after the first sam")
     warnings = ana["warnings"] + vwarn
-    steps, Tq = plan(vocab, first, total_beats, bt, onsets, speeds, a.min_seconds, warnings, a.tala)
+    steps, Tq = plan(vocab, first, total_beats, bt, onsets, speeds, a.min_seconds, warnings, a.tala, extra_features=extra_features)
 
     segments = []
     for pos, o in steps:
@@ -1004,6 +1239,8 @@ def main():
     timeline = {
         "audio_file": song.name, "title": song.stem, "tala_beats": a.tala, "first_sam_index": first,
         "duration": ana["duration"], "beats": [{"t": b["t"], "pos": b["pos"]} for b in ana["beats"]],
+        "pitch_track": extra_features.get("pitch_per_beat", []),
+        "sections": extra_features.get("sections", []),
         "segments": segments, "warnings": warnings,
         "vocabulary": {n: {k: v for k, v in vocab[n].items() if k in ("keys", "cycle", "root")} for n in used},
     }
@@ -1013,6 +1250,8 @@ def main():
     log(f"    {len(segments)} steps from {len(used)} adavus, covering {total_beats} beats")
 
     log("3/3 writing the player ...")
+    if song.resolve() != (out / song.name).resolve():
+        shutil.copy(song, out / song.name)
     page = PLAYER.replace("__TIMELINE__", json.dumps(timeline, separators=(",", ":")).replace("</", "<\\/"))
     page = page.replace("__TITLE__", html.escape(song.stem))
     (out / "index.html").write_text(page)
@@ -1028,16 +1267,31 @@ PLAYER = r"""<!DOCTYPE html>
 @media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecece6;--mut:#9a9a92;--line:#34342f;--acc:#fb923c;--card:#1f1f1c;color-scheme:dark}}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif;padding:16px}
 main{max-width:720px;margin:0 auto}
+h1{font-size:18px;margin:0 0 8px}
 canvas{width:100%;display:block;background:var(--card);border:1px solid var(--line);border-radius:10px}
 #fig{height:auto;aspect-ratio:3/2}
 #bar{height:44px;margin-top:8px;cursor:pointer}
 audio{width:100%;margin:10px 0}
-#now{font-size:16px;color:var(--fg);margin:8px 0 0}
+.row{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:8px 0;color:var(--mut);font-size:13px}
+#now{font-size:16px;color:var(--fg)}
+#cnt{font-variant-numeric:tabular-nums}
+.sam{color:var(--acc);font-weight:600}
+details{margin-top:10px}summary{cursor:pointer;color:var(--mut)}
+#list{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+#list button{font:12px system-ui;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 7px;cursor:pointer}
+.warn{color:var(--acc);font-size:13px}
 </style></head><body><main>
+<h1>__TITLE__</h1>
 <canvas id="fig"></canvas>
-<audio id="au" controls preload="auto"></audio>
 <canvas id="bar"></canvas>
-<div id="now"></div>
+<audio id="au" controls preload="auto"></audio>
+<div class="row"><span id="now"></span><span id="cnt"></span></div>
+<div class="row">
+<label><input type="checkbox" id="clk"> beat clicks (accent on the sam)</label>
+<label><input type="checkbox" id="dense" checked> smooth motion (uses the recorded cycle when available)</label>
+</div>
+<div id="warns" class="warn"></div>
+<details><summary>All steps (click to jump)</summary><div id="list"></div></details>
 <script>
 const T = __TIMELINE__;
 const BONES = ["sp","lua","lfa","rua","rfa","lt","ls","rt","rs"];
@@ -1051,6 +1305,26 @@ function angDelta(a, b) {
   if (d > 180) d -= 360;
   if (d < -180) d += 360;
   return d;
+}
+// Biomechanical hinge limits: knees and elbows cannot hyperextend or invert
+function enforceLimits(p) {
+  if (!p) return p;
+  const r = Object.assign({}, p);
+  let dl = angDelta(r.lt, r.ls);
+  if (dl < -5) r.ls += (-5 - dl);
+  else if (dl > 150) r.ls += (150 - dl);
+
+  let dr = angDelta(r.rt, r.rs);
+  if (dr > 5) r.rs += (5 - dr);
+  else if (dr < -150) r.rs += (-150 - dr);
+
+  let delL = angDelta(r.lua, r.lfa);
+  if (Math.abs(delL) > 160) r.lfa += (Math.sign(delL) * 160 - delL);
+
+  let delR = angDelta(r.rua, r.rfa);
+  if (Math.abs(delR) > 160) r.rfa += (Math.sign(delR) * 160 - delR);
+
+  return r;
 }
 const lerpPose = (a,b,w) => {
   const r = {};
@@ -1126,19 +1400,31 @@ function segIndexAt(b){
   while (lo < hi) { const m = (lo+hi+1) >> 1; if (segs[m].start_beat <= b) lo = m; else hi = m-1; }
   return lo;
 }
+function pitchAtBeat(b) {
+  const pt = T.pitch_track;
+  if (!pt || !pt.length) return 0;
+  const idx = Math.max(0, Math.min(pt.length - 1, Math.round(b)));
+  return pt[idx] || 0;
+}
 function poseFor(b){
   const i = segIndexAt(b);
-  if (i < 0) return segs.length ? poseAtU(segs[0],0) : BASE;
+  if (i < 0) return segs.length ? enforceLimits(poseAtU(segs[0],0)) : BASE;
   const s = segs[i], u = (b - s.start_beat)/s.n_beats;
-  if (u >= 1) return poseAtU(s,1);
+  if (u >= 1) return enforceLimits(poseAtU(s,1));
   let p = poseAtU(s,u);
   if (i > 0) {                                        // soften the join if the previous step ended in another pose
     const bl = Math.min(0.5, 0.25*s.n_beats), d = b - s.start_beat;
     if (d < bl) p = lerpPose(poseAtU(segs[i-1],1), p, ease(d/bl));
   }
-  return p;
+  // Melodic pitch contour modulation: arms and chest respond to vocal melody
+  const pMod = pitchAtBeat(b);
+  p.lua += pMod * 12.0;
+  p.rua += pMod * 12.0;
+  p.sp += pMod * 3.5;
+  return enforceLimits(p);
 }
-function fk(p){
+function fk(rawP){
+  const p = enforceLimits(rawP);
   const dir = a => [Math.sin(a*Math.PI/180), Math.cos(a*Math.PI/180)];
   const add = (a,v,l) => [a[0]+v[0]*l, a[1]+v[1]*l];
   const pel = [0,0], neck = add(pel, dir(p.sp), 1.5), head = add(neck, dir(p.sp), .55);
@@ -1188,24 +1474,58 @@ const hue = n => (names.indexOf(n)*57) % 360;
 function drawBar(t){
   const W = bar.width, H = bar.height, D = T.duration;
   bx.clearRect(0,0,W,H);
+  if (T.sections && T.sections.length) {
+    for (const sec of T.sections) {
+      const s0 = bt[Math.min(nb-1, sec.start_beat)] || 0;
+      const s1 = bt[Math.min(nb-1, sec.end_beat)] || D;
+      const x0 = s0/D*W, x1 = s1/D*W;
+      bx.fillStyle = 'rgba(255,255,255,0.06)';
+      bx.fillRect(x0, 0, x1 - x0, H*.22);
+      bx.fillStyle = css('--mut');
+      bx.font = (10*dpr) + 'px system-ui';
+      bx.fillText(sec.label.toUpperCase(), x0 + 4*dpr, H*.16);
+    }
+  }
   for (const s of segs) {
     bx.fillStyle = 'hsl(' + hue(s.adavu) + ',55%,55%)';
-    bx.fillRect(s.start_time/D*W, H*.15, Math.max(1,(s.end_time-s.start_time)/D*W-1), H*.7);
+    bx.fillRect(s.start_time/D*W, H*.22, Math.max(1,(s.end_time-s.start_time)/D*W-1), H*.65);
   }
   bx.fillStyle = css('--fg'); bx.fillRect(Math.min(au.currentTime,D)/D*W - dpr, 0, 2*dpr, H);
 }
+let ac = null, lastInt = -1;
+function click(accent){
+  if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.frequency.value = accent ? 1500 : 900; g.gain.value = .12;
+  g.gain.exponentialRampToValueAtTime(.001, ac.currentTime+.06);
+  o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+.07);
+}
 function frame(){
-  const t = au.currentTime, b = beatAt(t);
+  const t = au.currentTime, b = beatAt(t), bi = Math.floor(b);
   drawFigure(poseFor(b)); drawBar(t);
   const i = segIndexAt(b), s = i >= 0 ? segs[i] : null;
   document.getElementById('now').textContent = s && b < s.start_beat + s.n_beats ? s.adavu + '  x' + s.speed : '-';
+  const rel = bi - T.first_sam_index, pos = ((rel % tala) + tala) % tala + 1;
+  const cnt = document.getElementById('cnt');
+  cnt.textContent = 'beat count ' + pos + ' / ' + tala; cnt.className = pos === 1 ? 'sam' : '';
+  if (bi !== lastInt) { lastInt = bi; if (!au.paused && document.getElementById('clk').checked) click(pos === 1); }
   requestAnimationFrame(frame);
 }
 function init(){
   layoutStage();
   au.src = encodeURI(T.audio_file);
   fit(fig); fit(bar);
+  document.getElementById('dense').onchange = e => { useDense = e.target.checked; };
   bar.onclick = e => { au.currentTime = (e.offsetX/bar.clientWidth)*T.duration; };
+  const list = document.getElementById('list');
+  segs.forEach(s => {
+    const btn = document.createElement('button');
+    btn.textContent = s.start_time.toFixed(1) + 's  ' + s.adavu + ' x' + s.speed;
+    btn.style.borderLeft = '4px solid hsl(' + hue(s.adavu) + ',55%,55%)';
+    btn.onclick = () => { au.currentTime = s.start_time; };
+    list.appendChild(btn);
+  });
+  document.getElementById('warns').textContent = T.warnings.join('  |  ');
   window.__player = {beatAt, poseFor, segIndexAt, fk, drawFigure};
   requestAnimationFrame(frame);
 }

@@ -26,7 +26,8 @@ Given a user prompt describing a song, dance style, raga, tala, tempo, mood, or 
 2. Use browser search to find an authentic, publicly available YouTube video for this composition.
 3. Determine the traditional Tala and estimated beat cycle length (e.g., Adi Tala = 8 beats, Rupaka Tala = 3 or 6 beats, Misra Chapu = 7 beats).
 
-Return your response strictly as a valid JSON object matching this structure:
+Remember that only the first 2 minutes of the song is used for the dance. Please conisder this while recommending the song.
+Return your response strictly as a valid JSON object matching this structure:   
 {
   "song_name": "<Title of the composition>",
   "composer": "<Composer / Vaggeyakara or artist>",

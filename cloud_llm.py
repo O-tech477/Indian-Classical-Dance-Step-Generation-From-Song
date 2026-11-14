@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 from modules.audio_service import download_song_audio
 from modules.llm_service import log, recommend_song
 from modules.storage_service import MusicLibrary
+from modules.tala import tala_beats
 
 
 def find_and_download_song(
@@ -48,6 +49,7 @@ def find_and_download_song(
         output_dir=output_dir,
     )
 
+    meta["tala_beats"] = tala_beats(meta.get("tala"), meta.get("tala_beats"))
     meta["audio_path"] = str(audio_file.resolve())
     meta["audio_info"] = audio_info
 
@@ -78,9 +80,7 @@ def main() -> None:
         print(json.dumps(result, indent=2))
         log("\nReady to run with pipeline.py:")
         tala = result.get("tala_beats") or 8
-        log(
-            f"  uv run pipeline.py \"{result['audio_path']}\" --adavus landmarks_json -o output --tala {tala} --default-beats 4"
-        )
+        log(f"  uv run pipeline.py \"{result['audio_path']}\" --adavus landmarks_json -o output --tala {tala}")
     except Exception as e:
         log(f"Error: {e}")
         sys.exit(1)

@@ -44,7 +44,7 @@
         <div class="transcript">
           <div id="welcome" class="welcome">
             <h1>What shall we dance to?</h1>
-            <p>Describe a mood, adavu, raga, tala, or song. Each result is saved in the history on the left, named after the song.</p>
+            <p>Describe a mood, adavu, raga, tala, or song, or upload one with the + button. Each result is saved in the history on the left, named after the song.</p>
           </div>
           <div id="thread" class="thread" hidden></div>
         </div>
@@ -54,10 +54,20 @@
           <div class="composer">
             <textarea id="prompt-input" rows="3" placeholder="e.g. An energetic Carnatic song in Adi Tala with good rhythmic tempo for Thattadavu..." required></textarea>
             <div class="composer-bar">
+              <div class="composer-tools">
+              <button type="button" id="upload-btn" class="upload-btn" aria-label="Upload a song" title="Upload a song">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                  <path d="M10 17.2a2.2 2.2 0 1 1-1.7-2.14V6.4l7.4-1.7v7.1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="7.4" cy="17.3" r="1.8" fill="currentColor"/>
+                  <path d="M17.6 13.4v6.4M14.4 16.6h6.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                </svg>
+              </button>
+              <input type="file" id="upload-input" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,.aac" hidden>
               <label class="sr-only" for="model-select">Groq Model</label>
               <select id="model-select" class="composer-select">
                 <option value="openai/gpt-oss-20b" selected>Groq GPT-OSS 20B</option>
               </select>
+              </div>
               <button type="submit" id="submit-btn" class="send-btn" aria-label="Curate and download">
                 <svg class="send-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
                   <path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>

@@ -37,6 +37,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const chatList = document.getElementById('chat-list');
   const newChatBtn = document.getElementById('new-chat-btn');
   const storageNote = document.getElementById('storage-note');
+  const uploadBtn = document.getElementById('upload-btn');
+  const uploadInput = document.getElementById('upload-input');
 
   let activeChatId = localStorage.getItem('bn-active-chat') || null;
   let turns = [];
@@ -99,6 +101,64 @@ document.addEventListener('DOMContentLoaded', () => {
   backBtn.addEventListener('click', showPrompt);
   newChatBtn.addEventListener('click', startNewChat);
 
+  uploadBtn.addEventListener('click', () => uploadInput.click());
+  uploadInput.addEventListener('change', () => {
+    const file = uploadInput.files && uploadInput.files[0];
+    uploadInput.value = '';
+    if (file) uploadSong(file);
+  });
+
+  function setBusy(busy) {
+    submitBtn.disabled = busy;
+    uploadBtn.disabled = busy;
+    btnSpinner.hidden = !busy;
+    statusBox.hidden = !busy;
+  }
+
+  async function uploadSong(file) {
+    errorBox.hidden = true;
+    errorBox.textContent = '';
+    setBusy(true);
+    statusTitle.textContent = 'Uploading your song...';
+    statusDetail.textContent = file.name;
+
+    const timer = setTimeout(() => {
+      statusTitle.textContent = 'Mapping the dance...';
+      statusDetail.textContent = 'Fitting adavus to the beats and drawing the stick figure.';
+    }, 1500);
+
+    try {
+      const body = new FormData();
+      body.append('audio', file);
+      body.append('prompt', promptInput.value.trim());
+      body.append('chat_id', activeChatId || '');
+      const res = await fetch('/api/upload', { method: 'POST', body });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Upload failed');
+      }
+      displaySong(data.song);
+      loadLibrary();
+      if (data.chat && data.chat.id) {
+        activeChatId = data.chat.id;
+        localStorage.setItem('bn-active-chat', activeChatId);
+        turns = data.chat.turns || [];
+        renderThread();
+        loadChats();
+      }
+      promptInput.value = '';
+      syncComposer();
+      if (!data.dance_url) throw new Error('The dance player was not created.');
+      showDance(data.dance_url, data.song.prompt || file.name);
+    } catch (err) {
+      errorBox.textContent = err.message;
+      errorBox.hidden = false;
+    } finally {
+      clearTimeout(timer);
+      setBusy(false);
+    }
+  }
+
   // Form submit
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -108,9 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Reset error & show loading
     errorBox.hidden = true;
     errorBox.textContent = '';
-    submitBtn.disabled = true;
-    btnSpinner.hidden = false;
-    statusBox.hidden = false;
+    setBusy(true);
     statusTitle.textContent = 'Searching with Groq...';
     statusDetail.textContent = 'Looking up an Indian classical recording with browser search...';
 
@@ -163,9 +221,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       clearTimeout(timer1);
       clearTimeout(timer2);
-      submitBtn.disabled = false;
-      btnSpinner.hidden = true;
-      statusBox.hidden = true;
+      setBusy(false);
     }
   });
 

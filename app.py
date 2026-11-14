@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -14,13 +15,17 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from modules.audio_service import download_song_audio
+from modules.audio_service import cap_song, download_song_audio, sanitize_filename, to_mp3
+from modules.tala import tala_beats
 from modules.chat_store import _title_from_prompt, build_chat_store
 from modules.instrument_service import predict_instruments
 from modules.llm_service import recommend_song
 from modules.storage_service import MusicLibrary
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
+
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".opus", ".webm"}
 
 ROOT = Path(__file__).resolve().parent
 DOWNLOADS_DIR = ROOT / "downloads"
@@ -50,8 +55,6 @@ def run_dance_pipeline(audio_file: Path, tala_beats: int) -> str:
             str(out_dir),
             "--tala",
             str(tala),
-            "--default-beats",
-            "4",
         ],
         cwd=str(ROOT),
         capture_output=True,
@@ -130,6 +133,64 @@ def delete_chat(chat_id):
     if not deleted:
         return jsonify({"success": False, "error": "Chat not found"}), 404
     return jsonify({"success": True})
+
+
+def _save_chat_turn(chat_id, saved_entry, prompt):
+    if not chat_id:
+        created = chat_store.create_chat(saved_entry.get("song_name") or _title_from_prompt(prompt))
+        chat_id = created["id"]
+    turn = chat_store.add_turn(chat_id, {**saved_entry, "prompt": prompt, "dance_url": saved_entry.get("dance_url")})
+    return chat_id, turn
+
+
+@app.route("/api/upload", methods=["POST"])
+def upload_song():
+    """Save an uploaded song, catalog it, and build its dance. Adi tala unless the prompt names one."""
+    uploaded = request.files.get("audio")
+    if uploaded is None or not uploaded.filename:
+        return jsonify({"success": False, "error": "Choose an audio file to upload"}), 400
+    ext = Path(uploaded.filename).suffix.lower()
+    if ext not in AUDIO_EXTENSIONS:
+        return jsonify({"success": False, "error": "Upload an audio file (mp3, wav, m4a, ogg, flac)"}), 400
+
+    prompt = (request.form.get("prompt") or "").strip()
+    chat_id = (request.form.get("chat_id") or "").strip()
+    song_name = sanitize_filename(Path(uploaded.filename).stem).replace("_", " ")
+    beats = tala_beats(prompt, 8) if prompt else 8
+    dest = DOWNLOADS_DIR / f"{sanitize_filename(Path(uploaded.filename).stem)}{ext}"
+    if dest.exists() or dest.with_suffix(".mp3").exists():
+        dest = dest.with_name(f"{dest.stem}_{int(time.time())}{dest.suffix}")
+
+    try:
+        if chat_id and not chat_store.get_chat(chat_id):
+            return jsonify({"success": False, "error": "Chat not found"}), 404
+        uploaded.save(dest)
+        dest = cap_song(to_mp3(dest), dest.with_suffix(".mp3"))
+        prompt = prompt or f"Uploaded {song_name}"
+        dance_url = run_dance_pipeline(dest, beats)
+        saved_entry = library.add_song({
+            "song_name": song_name,
+            "tala": "Adi Tala" if beats == 8 else f"{beats} beats",
+            "tala_beats": beats,
+            "description": prompt,
+            "audio_path": str(dest.resolve()),
+            "audio_url": f"/audio/{dest.name}",
+            "filename": dest.name,
+            "prompt": prompt,
+            "dance_url": dance_url,
+        })
+        chat_id, turn = _save_chat_turn(chat_id, saved_entry, prompt)
+        return jsonify({
+            "success": True,
+            "song": saved_entry,
+            "dance_url": dance_url,
+            "chat": chat_store.get_chat(chat_id),
+            "turn": turn,
+        })
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        detail = str(exc).strip().splitlines()[-1] or "the file could not be read"
+        return jsonify({"success": False, "error": f"Could not use that file: {detail}"}), 500
 
 
 @app.route("/api/recommend-and-download", methods=["POST"])

@@ -49,6 +49,27 @@ def probe_duration(path: Path) -> Optional[float]:
         return None
 
 
+def to_mp3(src: Path) -> Path:
+    """Return src as an MP3, converting and removing the original when it is not one."""
+    if src.suffix.lower() == ".mp3":
+        return src
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg is required to convert uploaded audio")
+    out = src.with_suffix(".mp3")
+    try:
+        subprocess.run(
+            [ffmpeg, "-y", "-i", str(src), "-vn", "-acodec", "libmp3lame", "-q:a", "2", str(out)],
+            capture_output=True, text=True, check=True,
+        )
+    except subprocess.CalledProcessError as err:
+        out.unlink(missing_ok=True)
+        detail = (err.stderr or "ffmpeg failed").strip()
+        raise RuntimeError(f"Could not read '{src.name}': {detail[-300:]}") from err
+    src.unlink(missing_ok=True)
+    return out
+
+
 def cap_song(src: Path, dest: Path, max_seconds: float = MAX_SONG_SECONDS) -> Path:
     """Write the first two minutes of src to dest.
 

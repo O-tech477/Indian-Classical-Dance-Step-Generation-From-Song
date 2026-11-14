@@ -1,0 +1,87 @@
+{
+ "_about": "Hand-checked facts per landmark clip. beats: counts in one repetition of the step. checked: true once someone has counted it against the clip. Optional: period_s (seconds per repetition in the clip), start_s/end_s (the clean stretch of the clip to use).",
+ "DhalankuAdavu1": {
+  "beats": 4,
+  "checked": false
+ },
+ "KarthariAdavu": {
+  "beats": 4,
+  "checked": false
+ },
+ "KattiAdavu": {
+  "beats": 4,
+  "checked": false
+ },
+ "Korvai Adavu2.1": {
+  "beats": 4,
+  "checked": false
+ },
+ "KudhitthaMettu Adavu1.1": {
+  "beats": 4,
+  "checked": false
+ },
+ "MandiAdavu2": {
+  "beats": 4,
+  "checked": false
+ },
+ "Nattadavu1.1": {
+  "beats": 4,
+  "checked": false
+ },
+ "ParavalAdavu1": {
+  "beats": 4,
+  "checked": false
+ },
+ "SarukkalAdavu": {
+  "beats": 4,
+  "checked": false
+ },
+ "THATTIMETTUADAVU1.1": {
+  "beats": 4,
+  "checked": false
+ },
+ "THEERMAANAMADAVU": {
+  "beats": 4,
+  "checked": false
+ },
+ "TaTeiTeiTa1": {
+  "beats": 4,
+  "checked": false
+ },
+ "ThaThaiThaHa1": {
+  "beats": 4,
+  "checked": false
+ },
+ "ThaThaiTham1": {
+  "beats": 4,
+  "checked": false
+ },
+ "ThaTheiTheiTha2.1": {
+  "beats": 4,
+  "checked": false
+ },
+ "ThahathaJamTharithaAdavu": {
+  "beats": 4,
+  "checked": false
+ },
+ "ThaiThaiThaThamAdavu1": {
+  "beats": 4,
+  "checked": false
+ },
+ "ThaiyaThaihi1": {
+  "beats": 4,
+  "checked": false
+ },
+ "Thattadavu1": {
+  "beats": 4,
+  "checked": false
+ },
+ "ThattimettuAdavu2": {
+  "beats": 4,
+  "checked": false
+ },
+ "Uthplavanaadavu1": {
+  "beats": 4,
+  "checked": false
+ }
+}

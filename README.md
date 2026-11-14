@@ -8,7 +8,13 @@ We attempt to map Bharatanatyam steps to any Indian classical song on the basis 
   - `audio_service.py`: YouTube extraction and MP3 audio download via `yt-dlp`.
   - `storage_service.py`: Local music catalog and metadata tracker (`downloads/library.json`).
 - **`cloud_llm.py`**: CLI facade for LLM-based song recommendation and audio downloading.
-- **`pipeline.py`**: End-to-end choreography generator (song analysis -> adavu planning -> interactive stick-figure HTML player).
+- **`pipeline.py`**: Command line for the choreography generator (song analysis -> adavu planning -> interactive stick-figure HTML player). The stages live in `dance/`:
+  - `analysis.py`: beats, tempo-octave fix, sam, gaps in the pulse, sections, pitch.
+  - `cycle.py`: one landmark clip -> one clean periodic cycle of bone angles and stage travel.
+  - `pose.py`: knee and elbow hinge limits.
+  - `vocabulary.py`: builds, caches and loads the adavu vocabulary (with `adavu_meta.json`).
+  - `planner.py`: picks the adavu, speed and beats for each tala phrase.
+  - `player.py` + `player.html`: writes `timeline.json` and the stick-figure player.
 
 ## How to Initialize and Run
 
@@ -54,6 +60,10 @@ uv run cloud_llm.py "Energetic Adi tala Carnatic song for Thattadavu" -o downloa
 ### 4. Run the Dance Choreography Pipeline
 Generate the stick-figure player from any downloaded song:
 ```bash
-uv run pipeline.py downloads/<your-song>.mp3 --adavus landmarks_json -o output --tala 8 --default-beats 4
+uv run pipeline.py downloads/<your-song>.mp3 --adavus landmarks_json -o output --tala 8
 ```
 Double-click `output/index.html` to open the stick-figure player in your browser.
+
+The length of each adavu in beats comes from `landmarks_json/adavu_meta.json`. Every clip starts at 4 beats with `"checked": false`. Count each step against its clip, set `"beats"`, and set `"checked": true`. `period_s`, `start_s` and `end_s` can also be set there when the automatic period or clean stretch is wrong. The vocabulary is cached in `landmarks_json/.vocab/` and rebuilt when a clip, the metadata file or the vocabulary code in `dance/` changes.
+
+If the accent of the beat clicks in the player is not on the sam, rerun with `--sam-beat N`, where N is the index of a beat that is a sam.

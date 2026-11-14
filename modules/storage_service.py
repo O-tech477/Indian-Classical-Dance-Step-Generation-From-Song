@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from modules.tala import tala_beats
+
 
 class MusicLibrary:
     def __init__(self, storage_dir: str = "downloads"):
@@ -39,7 +41,7 @@ class MusicLibrary:
             "composer": song_meta.get("composer"),
             "raga": song_meta.get("raga"),
             "tala": song_meta.get("tala"),
-            "tala_beats": song_meta.get("tala_beats", 8),
+            "tala_beats": tala_beats(song_meta.get("tala"), song_meta.get("tala_beats")),
             "youtube_url": song_meta.get("youtube_url"),
             "description": song_meta.get("description"),
             "filename": filename,

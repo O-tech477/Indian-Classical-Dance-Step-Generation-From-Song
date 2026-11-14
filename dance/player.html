@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ - adavu player</title>
+<style>
+:root{--bg:#fafaf7;--fg:#1c1c1a;--mut:#6b6b66;--line:#d8d8d0;--acc:#c2410c;--card:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecece6;--mut:#9a9a92;--line:#34342f;--acc:#fb923c;--card:#1f1f1c;color-scheme:dark}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif;padding:16px}
+main{max-width:720px;margin:0 auto}
+h1{font-size:18px;margin:0 0 8px}
+canvas{width:100%;display:block;background:var(--card);border:1px solid var(--line);border-radius:10px}
+#fig{height:auto;aspect-ratio:3/2}
+#bar{height:44px;margin-top:8px;cursor:pointer}
+audio{width:100%;margin:10px 0}
+.instrument-panel{margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.instrument-heading{display:flex;justify-content:space-between;gap:8px;align-items:baseline;font-weight:600}
+.instrument-window,.instrument-note{color:var(--mut);font-size:12px}
+.instrument-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;min-height:24px}
+.instrument-chip{padding:3px 9px;border-radius:999px;background:var(--bg);border:1px solid var(--line);font-size:13px}
+.row{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:8px 0;color:var(--mut);font-size:13px}
+#now{font-size:16px;color:var(--fg)}
+#cnt{font-variant-numeric:tabular-nums}
+.sam{color:var(--acc);font-weight:600}
+details{margin-top:10px}summary{cursor:pointer;color:var(--mut)}
+#list{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+#list button{font:12px system-ui;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 7px;cursor:pointer}
+.warn{color:var(--acc);font-size:13px}
+</style></head><body><main>
+<h1>__TITLE__</h1>
+<canvas id="fig"></canvas>
+<canvas id="bar"></canvas>
+<audio id="au" controls preload="auto"></audio>
+<section id="instrument-panel" class="instrument-panel" aria-live="polite">
+<div class="instrument-heading"><span>Instruments playing now</span><span id="instrument-window" class="instrument-window"></span></div>
+<div id="instrument-list" class="instrument-list"><span class="instrument-note">Play the song to detect instruments.</span></div>
+<div id="instrument-note" class="instrument-note">Predictions update continuously from the saved MP3.</div>
+</section>
+<div class="row"><span id="now"></span><span id="cnt"></span></div>
+<div class="row">
+<label><input type="checkbox" id="clk"> beat clicks (accent on the sam)</label>
+<label><input type="checkbox" id="dense" checked> smooth motion (uses the recorded cycle when available)</label>
+<label><input type="checkbox" id="pitch"> arms follow the melody (changes the recorded hand positions)</label>
+</div>
+<div id="warns" class="warn"></div>
+<details><summary>All steps (click to jump)</summary><div id="list"></div></details>
+<script>
+const T = __TIMELINE__;
+const BONES = ["sp","lua","lfa","rua","rfa","lt","ls","rt","rs"];
+const BASE = {sp:180,lua:-100,lfa:-100,rua:100,rfa:100,lt:-40,ls:30,rt:40,rs:-30};
+const bt = T.beats.map(b => b.t), nb = bt.length, segs = T.segments, tala = T.tala_beats;
+const ease = x => x*x*(3-2*x);
+// Shortest step around the circle. 179 -> -179 is a 2 degree move, not a 358 degree flip.
+function angDelta(a, b) {
+  let d = b - a;
+  d = d % 360;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  return d;
+}
+// Biomechanical hinge limits: knees and elbows cannot hyperextend or invert
+function enforceLimits(p) {
+  if (!p) return p;
+  const r = Object.assign({}, p);
+  let dl = angDelta(r.lt, r.ls);
+  if (dl < -5) r.ls += (-5 - dl);
+  else if (dl > 150) r.ls += (150 - dl);
+
+  let dr = angDelta(r.rt, r.rs);
+  if (dr > 5) r.rs += (5 - dr);
+  else if (dr < -150) r.rs += (-150 - dr);
+
+  let delL = angDelta(r.lua, r.lfa);
+  if (Math.abs(delL) > 160) r.lfa += (Math.sign(delL) * 160 - delL);
+
+  let delR = angDelta(r.rua, r.rfa);
+  if (Math.abs(delR) > 160) r.rfa += (Math.sign(delR) * 160 - delR);
+
+  return r;
+}
+const lerpPose = (a,b,w) => {
+  const r = {};
+  for (const k of BONES) r[k] = a[k] + angDelta(a[k], b[k])*w;
+  r.rootx = (a.rootx||0) + ((b.rootx||0)-(a.rootx||0))*w;
+  r.rooty = (a.rooty||0) + ((b.rooty||0)-(a.rooty||0))*w;
+  return r;
+};
+// Place each step on the stage. A step that finishes off to one side continues from there
+// and turns back at the edge. A step that travels out and comes home is mirrored the next
+// time, so the dance uses both sides of the stage instead of always leaving to screen right.
+function layoutStage(){
+  const limit = 3.2;
+  let x = 0, sign = 1;
+  const reach = root => {
+    if (!root || !root.x || !root.x.length) return 0;
+    let m = Math.abs((root.shift && root.shift[0]) || 0);
+    for (const v of root.x) m = Math.max(m, Math.abs(v));
+    return m;
+  };
+  for (const s of segs) {
+    const root = T.vocabulary[s.adavu] && T.vocabulary[s.adavu].root;
+    const shift = root && root.shift ? (root.shift[0] || 0) : 0;
+    let sg = sign;
+    if (Math.abs(x + sg*shift) > limit && Math.abs(x - sg*shift) < Math.abs(x + sg*shift)) sg = -sg;
+    s.xSign = sg;
+    s.x0 = x;
+    x += sg * shift;
+    if (x > limit) x = limit; else if (x < -limit) x = -limit;
+    if (reach(root) > 0.45) sign = -sg;
+  }
+}
+
+function beatAt(t){                                   // fractional beat index at time t
+  if (t <= bt[0]) return (t-bt[0])/(bt[1]-bt[0]);
+  if (t >= bt[nb-1]) return nb-1 + (t-bt[nb-1])/(bt[nb-1]-bt[nb-2]);
+  let lo = 0, hi = nb-1;
+  while (hi-lo > 1) { const m = (lo+hi) >> 1; if (bt[m] <= t) lo = m; else hi = m; }
+  return lo + (t-bt[lo])/(bt[hi]-bt[lo]);
+}
+let useDense = true, usePitch = false;
+function poseAtU(seg, u){
+  const v = T.vocabulary[seg.adavu]; u = Math.min(Math.max(u,0),1);
+  const sign = seg.xSign || 1, x0 = seg.x0 || 0;
+  let r;
+  if (useDense && v.cycle) {
+    const N = v.cycle.sp.length, x = u*N, i = Math.floor(x) % N, j = (i+1) % N, w = x - Math.floor(x);
+    r = {};
+    for (const k of BONES) r[k] = v.cycle[k][i] + angDelta(v.cycle[k][i], v.cycle[k][j])*w;
+    const root = v.root;
+    if (root) {
+      const sh = root.shift || [0, 0];
+      r.rootx = root.x[i] + (root.x[j]-root.x[i])*w + u*(sh[0]||0);
+      r.rooty = root.y[i] + (root.y[j]-root.y[i])*w + u*(sh[1]||0);
+    }
+  } else {
+    const ks = v.keys;
+    let a = ks[ks.length-1], b = a, w = 0;
+    for (let i = 0; i < ks.length-1; i++) if (u <= ks[i+1][0]) {
+      a = ks[i]; b = ks[i+1];
+      w = ease((u-a[0])/Math.max(1e-6, b[0]-a[0]));
+      break;
+    }
+    r = lerpPose(a[1], b[1], w);
+  }
+  r.rootx = x0 + (r.rootx || 0) * sign;
+  r.rooty = r.rooty || 0;
+  return r;
+}
+function segIndexAt(b){
+  if (!segs.length || b < segs[0].start_beat) return -1;
+  let lo = 0, hi = segs.length-1;
+  while (lo < hi) { const m = (lo+hi+1) >> 1; if (segs[m].start_beat <= b) lo = m; else hi = m-1; }
+  return lo;
+}
+function pitchAtBeat(b) {
+  const pt = T.pitch_track;
+  if (!pt || !pt.length) return 0;
+  const idx = Math.max(0, Math.min(pt.length - 1, Math.round(b)));
+  return pt[idx] || 0;
+}
+// A step much longer than the others is a hole in the beat track, not a slow dance.
+// Repeat the adavu at the pace of the other steps instead of playing it in slow motion.
+const stepDur = s => s.end_time - s.start_time;
+const _sortedDur = segs.map(stepDur).sort((a, b) => a - b);
+const typicalStep = _sortedDur.length ? _sortedDur[Math.floor(_sortedDur.length / 2)] : 2.4;
+function cycleU(s, b) {
+  let u = (b - s.start_beat) / s.n_beats;
+  const dur = stepDur(s);
+  if (dur > Math.max(5.5, typicalStep * 2.2)) {
+    const reps = Math.max(2, Math.round(dur / Math.max(typicalStep, 1.25)));
+    u = (u * reps) % 1;
+  }
+  return u;
+}
+function poseFor(b){
+  const i = segIndexAt(b);
+  if (i < 0) return segs.length ? enforceLimits(poseAtU(segs[0],0)) : BASE;
+  const s = segs[i], u = cycleU(s, b);
+  if (u >= 1) return enforceLimits(poseAtU(s,1));
+  let p = poseAtU(s,u);
+  if (i > 0) {                                        // soften the join if the previous step ended in another pose
+    const bl = Math.min(0.5, 0.25*s.n_beats), d = b - s.start_beat;
+    if (d < bl) p = lerpPose(poseAtU(segs[i-1],1), p, ease(d/bl));
+  }
+  if (usePitch) {
+    const pMod = pitchAtBeat(b);
+    p.lua += pMod * 12.0;
+    p.rua += pMod * 12.0;
+    p.sp += pMod * 3.5;
+  }
+  return enforceLimits(p);
+}
+function fk(rawP){
+  const p = enforceLimits(rawP);
+  const dir = a => [Math.sin(a*Math.PI/180), Math.cos(a*Math.PI/180)];
+  const add = (a,v,l) => [a[0]+v[0]*l, a[1]+v[1]*l];
+  const pel = [0,0], neck = add(pel, dir(p.sp), 1.5), head = add(neck, dir(p.sp), .55);
+  const across = dir(p.sp - 90);                         // screen-right when the spine is upright
+  const ls = add(neck, across, -.55), rs = add(neck, across, .55);
+  const lel = add(ls, dir(p.lua), .95), lwr = add(lel, dir(p.lfa), .85);
+  const rel = add(rs, dir(p.rua), .95), rwr = add(rel, dir(p.rfa), .85);
+  const lh = add(pel, across, -.34), rh = add(pel, across, .34);
+  const lk = add(lh, dir(p.lt), 1.15), la = add(lk, dir(p.ls), 1.15);
+  const rk = add(rh, dir(p.rt), 1.15), ra = add(rk, dir(p.rs), 1.15);
+  // Turned-out foot, folded toward the floor from the shin. side -1 is screen left.
+  const foot = (ankle, shin, side) => add(ankle, dir(shin + side * 65), .42);
+  const lf = foot(la, p.ls, -1), rf = foot(ra, p.rs, 1);
+  return {pel,neck,head,ls,rs,lel,lwr,rel,rwr,lh,rh,lk,la,rk,ra,lf,rf};
+}
+
+// ---------------------------------------------------------------- drawing and UI
+const fig = document.getElementById('fig'), bar = document.getElementById('bar'), au = document.getElementById('au');
+const fx = fig.getContext('2d'), bx = bar.getContext('2d');
+const dpr = window.devicePixelRatio || 1;
+function fit(c){ c.width = Math.max(1, c.clientWidth*dpr); c.height = Math.max(1, c.clientHeight*dpr); }
+function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n); }
+function drawFigure(p){
+  const W = fig.width, H = fig.height, S = H/6.4, f = fk(p);
+  const ry = p.rooty || 0;
+  const my = Math.max(f.la[1], f.ra[1], f.lf[1], f.rf[1]), gy = H*0.9;
+  let cx = W/2 + (p.rootx || 0)*S;
+  const margin = Math.max(1.3*S, 0.06*W);
+  if (cx < margin) cx = margin;
+  if (cx > W - margin) cx = W - margin;
+  const P = q => [cx + q[0]*S, gy + (q[1]-my+ry)*S];
+  fx.clearRect(0,0,W,H);
+  fx.strokeStyle = css('--line'); fx.lineWidth = 2*dpr; fx.beginPath(); fx.moveTo(W*.05,gy); fx.lineTo(W*.95,gy); fx.stroke();
+  fx.strokeStyle = css('--fg'); fx.lineWidth = 5*dpr; fx.lineCap = 'round'; fx.lineJoin = 'round';
+  const line = pts => { fx.beginPath(); pts.forEach((q,i) => { const t = P(q); i ? fx.lineTo(t[0],t[1]) : fx.moveTo(t[0],t[1]); }); fx.stroke(); };
+  line([f.pel,f.neck]); line([f.ls,f.rs]); line([f.lh,f.rh]);
+  line([f.ls,f.lel,f.lwr]); line([f.rs,f.rel,f.rwr]);
+  line([f.lh,f.lk,f.la,f.lf]); line([f.rh,f.rk,f.ra,f.rf]);
+  const h = P(f.head); fx.beginPath(); fx.arc(h[0],h[1],.28*S,0,7); fx.stroke();
+  fx.lineWidth = 3*dpr;
+  for (const q of [f.ls,f.rs,f.lel,f.rel,f.lh,f.rh,f.lk,f.rk]) {
+    const t = P(q); fx.beginPath(); fx.arc(t[0],t[1],.07*S,0,7); fx.stroke();
+  }
+}
+const names = [...new Set(segs.map(s => s.adavu))];
+const hue = n => (names.indexOf(n)*57) % 360;
+function drawBar(t){
+  const W = bar.width, H = bar.height, D = T.duration;
+  bx.clearRect(0,0,W,H);
+  if (T.sections && T.sections.length) {
+    for (const sec of T.sections) {
+      const s0 = bt[Math.min(nb-1, sec.start_beat)] || 0;
+      const s1 = bt[Math.min(nb-1, sec.end_beat)] || D;
+      const x0 = s0/D*W, x1 = s1/D*W;
+      bx.fillStyle = 'rgba(255,255,255,0.06)';
+      bx.fillRect(x0, 0, x1 - x0, H*.22);
+      bx.fillStyle = css('--mut');
+      bx.font = (10*dpr) + 'px system-ui';
+      bx.fillText(sec.label.toUpperCase(), x0 + 4*dpr, H*.16);
+    }
+  }
+  for (const s of segs) {
+    bx.fillStyle = 'hsl(' + hue(s.adavu) + ',55%,55%)';
+    bx.fillRect(s.start_time/D*W, H*.22, Math.max(1,(s.end_time-s.start_time)/D*W-1), H*.65);
+  }
+  bx.fillStyle = css('--fg'); bx.fillRect(Math.min(au.currentTime,D)/D*W - dpr, 0, 2*dpr, H);
+}
+let ac = null, lastInt = -1;
+function click(accent){
+  if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.frequency.value = accent ? 1500 : 900; g.gain.value = .12;
+  g.gain.exponentialRampToValueAtTime(.001, ac.currentTime+.06);
+  o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+.07);
+}
+function frame(){
+  const t = au.currentTime, b = beatAt(t), bi = Math.floor(b);
+  drawFigure(poseFor(b)); drawBar(t);
+  const i = segIndexAt(b), s = i >= 0 ? segs[i] : null;
+  document.getElementById('now').textContent = s && b < s.start_beat + s.n_beats ? s.adavu + '  x' + s.speed : '-';
+  const rel = bi - T.first_sam_index, pos = ((rel % tala) + tala) % tala + 1;
+  const cnt = document.getElementById('cnt');
+  cnt.textContent = 'beat count ' + pos + ' / ' + tala; cnt.className = pos === 1 ? 'sam' : '';
+  if (bi !== lastInt) { lastInt = bi; if (!au.paused && document.getElementById('clk').checked) click(pos === 1); }
+  requestAnimationFrame(frame);
+}
+function init(){
+  layoutStage();
+  au.src = encodeURI(T.audio_file);
+  au.addEventListener('play', refreshInstruments);
+  au.addEventListener('timeupdate', refreshInstruments);
+  setInterval(refreshInstruments, 5000);
+  fit(fig); fit(bar);
+  document.getElementById('dense').onchange = e => { useDense = e.target.checked; };
+  document.getElementById('pitch').onchange = e => { usePitch = e.target.checked; };
+  bar.onclick = e => { au.currentTime = (e.offsetX/bar.clientWidth)*T.duration; };
+  const list = document.getElementById('list');
+  segs.forEach(s => {
+    const btn = document.createElement('button');
+    btn.textContent = s.start_time.toFixed(1) + 's  ' + s.adavu + ' x' + s.speed;
+    btn.style.borderLeft = '4px solid hsl(' + hue(s.adavu) + ',55%,55%)';
+    btn.onclick = () => { au.currentTime = s.start_time; };
+    list.appendChild(btn);
+  });
+  document.getElementById('warns').textContent = T.warnings.join('  |  ');
+  window.__player = {beatAt, poseFor, segIndexAt, fk, drawFigure};
+  requestAnimationFrame(frame);
+}
+let instrumentRequestInFlight = false, lastInstrumentRequestAt = 0;
+async function refreshInstruments(){
+  if (au.paused || instrumentRequestInFlight || Date.now()-lastInstrumentRequestAt < 5000) return;
+  instrumentRequestInFlight = true;
+  lastInstrumentRequestAt = Date.now();
+  const note = document.getElementById('instrument-note');
+  try {
+    const url = '/api/instruments/' + encodeURIComponent(T.audio_file) + '?time=' + encodeURIComponent(au.currentTime || 0);
+    const response = await fetch(url);
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Instrument recognition failed.');
+    const list = document.getElementById('instrument-list');
+    list.replaceChildren();
+    const instruments = data.instruments || [];
+    if (!instruments.length) {
+      const empty = document.createElement('span');
+      empty.className = 'instrument-note';
+      empty.textContent = 'No clear instrument tags in this audio window.';
+      list.appendChild(empty);
+    } else {
+      instruments.forEach(item => {
+        const chip = document.createElement('span');
+        chip.className = 'instrument-chip';
+        chip.textContent = item.name;
+        list.appendChild(chip);
+      });
+    }
+    document.getElementById('instrument-window').textContent = data.window_start + 's–' + data.window_end + 's';
+    note.textContent = 'Likely instrument tags for the current 10-second audio window.';
+  } catch (error) {
+    note.textContent = 'Instrument recognition unavailable: ' + error.message;
+  } finally {
+    instrumentRequestInFlight = false;
+  }
+}
+init();
+</script></main></body></html>

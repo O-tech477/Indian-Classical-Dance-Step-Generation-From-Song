@@ -17,3 +17,4 @@ output/
 # Secrets
 .env
 downloads/
+landmarks_json/.vocab*/

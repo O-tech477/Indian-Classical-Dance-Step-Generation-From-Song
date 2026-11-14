@@ -534,6 +534,38 @@ h1 {
   padding: 4px 2px 2px;
 }
 
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.upload-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: var(--light-caramel);
+  color: var(--brandy);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.upload-btn:hover:not(:disabled) {
+  background: var(--bronze-spice);
+  color: var(--light-caramel);
+}
+
+.upload-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .composer-select {
   appearance: none;
   font-family: inherit;
@@ -547,7 +579,7 @@ h1 {
   cursor: pointer;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: calc(100% - 46px);
+  max-width: calc(100% - 46px - 44px);
 }
 
 .composer-select:hover {

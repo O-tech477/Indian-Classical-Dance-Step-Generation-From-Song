@@ -31,7 +31,6 @@ audio{width:100%;margin:10px 0}
 details{margin-top:10px}summary{cursor:pointer;color:var(--mut)}
 #list{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
 #list button{font:12px system-ui;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 7px;cursor:pointer}
-.warn{color:var(--acc);font-size:13px}
 </style></head><body><main>
 <h1>__TITLE__</h1>
 <div class="stage">
@@ -50,7 +49,6 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--mut)}
 <section id="instrument-panel" class="instrument-panel" aria-live="polite">
 <div class="instrument-heading"><span>Instruments playing now</span><span id="instrument-window" class="instrument-window"></span></div>
 <div id="instrument-list" class="instrument-list"><span class="instrument-note">Play the song to detect instruments.</span></div>
-<div id="instrument-note" class="instrument-note">Predictions update continuously from the saved MP3.</div>
 </section>
 <div class="row"><span id="now"></span><span id="cnt"></span></div>
 <div class="row">
@@ -58,7 +56,6 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--mut)}
 <label><input type="checkbox" id="dense" checked> smooth motion (uses the recorded cycle when available)</label>
 <label><input type="checkbox" id="pitch"> arms follow the melody (changes the recorded hand positions)</label>
 </div>
-<div id="warns" class="warn"></div>
 <details><summary>All steps (click to jump)</summary><div id="list"></div></details>
 <script>
 const T = __TIMELINE__;
@@ -354,7 +351,6 @@ function init(){
     btn.onclick = () => { au.currentTime = s.start_time; };
     list.appendChild(btn);
   });
-  document.getElementById('warns').textContent = T.warnings.join('  |  ');
   window.__player = {beatAt, poseFor, segIndexAt, fk, drawFigure};
   loadMudhras();
   requestAnimationFrame(frame);
@@ -364,7 +360,6 @@ async function refreshInstruments(){
   if (au.paused || instrumentRequestInFlight || Date.now()-lastInstrumentRequestAt < 5000) return;
   instrumentRequestInFlight = true;
   lastInstrumentRequestAt = Date.now();
-  const note = document.getElementById('instrument-note');
   try {
     const url = '/api/instruments/' + encodeURIComponent(T.audio_file) + '?time=' + encodeURIComponent(au.currentTime || 0);
     const response = await fetch(url);
@@ -387,9 +382,13 @@ async function refreshInstruments(){
       });
     }
     document.getElementById('instrument-window').textContent = data.window_start + 's–' + data.window_end + 's';
-    note.textContent = 'Likely instrument tags for the current 10-second audio window.';
   } catch (error) {
+    const list = document.getElementById('instrument-list');
+    list.replaceChildren();
+    const note = document.createElement('span');
+    note.className = 'instrument-note';
     note.textContent = 'Instrument recognition unavailable: ' + error.message;
+    list.appendChild(note);
   } finally {
     instrumentRequestInFlight = false;
   }

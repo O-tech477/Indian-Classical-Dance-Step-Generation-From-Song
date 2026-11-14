@@ -4,7 +4,9 @@ YouTube audio downloading, and local music storage.
 """
 
 import os
+import random
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -39,6 +41,10 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.permanent_session_lifetime = timedelta(days=30)
 
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".opus", ".webm"}
+YOUTUBE_VIDEO_URL = re.compile(
+    r"(?:youtube\.com/(?:watch\?(?:[^#]*&)?v=|embed/|shorts/)|youtu\.be/)([\w-]{11})",
+    re.IGNORECASE,
+)
 
 ROOT = Path(__file__).resolve().parent
 DOWNLOADS_DIR = ROOT / "downloads"
@@ -82,6 +88,35 @@ def user_library() -> MusicLibrary:
 
 def callback_url() -> str:
     return request.url_root.rstrip("/") + "/auth/callback"
+
+
+def valid_youtube_url(url: str | None) -> bool:
+    return bool(url and YOUTUBE_VIDEO_URL.search(str(url).strip()))
+
+
+def random_downloaded_song() -> Path | None:
+    """Pick one audio file already stored under downloads/."""
+    songs = [
+        path for path in DOWNLOADS_DIR.rglob("*")
+        if path.is_file()
+        and not path.name.startswith(".")
+        and path.suffix.lower() in AUDIO_EXTENSIONS
+    ]
+    if not songs:
+        return None
+    return random.choice(songs)
+
+
+def _place_in_account(source: Path, user_id: str) -> Path:
+    """Copy a saved song into this account's folder when it lives somewhere else."""
+    folder = account_folder(DOWNLOADS_DIR, user_id)
+    dest = folder / source.name
+    if source.resolve() == dest.resolve():
+        return dest
+    if dest.exists():
+        dest = dest.with_name(f"{dest.stem}_{int(time.time())}{dest.suffix}")
+    shutil.copy(source, dest)
+    return dest
 
 
 def run_dance_pipeline(audio_file: Path, tala_beats: int, user_id: str) -> str:
@@ -385,33 +420,61 @@ def recommend_and_download():
         if chat_id and not chat_store.get_chat(g.user["id"], chat_id):
             return jsonify({"success": False, "error": "Chat not found"}), 404
 
-        # Step 1: Query Groq with browser search
-        recommendation = recommend_song(user_prompt=user_prompt, model=model)
+        # Step 1: Query Groq with browser search. A missing or unusable YouTube
+        # link falls through to a song already saved in downloads/.
+        recommendation = {}
+        try:
+            found = recommend_song(user_prompt=user_prompt, model=model)
+            if isinstance(found, dict):
+                recommendation = found
+        except Exception:
+            app.logger.exception("Groq did not return a song recommendation")
+            recommendation = {}
 
-        song_name = recommendation.get("song_name") or "Classical_Song"
         youtube_url = recommendation.get("youtube_url")
-        search_query = (
-            recommendation.get("search_query")
-            or f"{song_name} {recommendation.get('raga', '')} {recommendation.get('composer', '')}".strip()
-        )
+        if valid_youtube_url(youtube_url):
+            song_name = recommendation.get("song_name") or "Classical_Song"
+            search_query = (
+                recommendation.get("search_query")
+                or f"{song_name} {recommendation.get('raga', '')} {recommendation.get('composer', '')}".strip()
+            )
+            audio_file, audio_info = download_song_audio(
+                youtube_url=youtube_url,
+                search_query=search_query,
+                song_name=song_name,
+                output_dir=str(account_folder(DOWNLOADS_DIR, g.user["id"])),
+            )
+            record = {
+                **recommendation,
+                "audio_path": str(audio_file.resolve()),
+                "audio_url": f"/audio/{g.user['id']}/{audio_file.name}",
+                "filename": audio_file.name,
+                "audio_info": audio_info,
+            }
+        else:
+            picked = random_downloaded_song()
+            if picked is None:
+                return jsonify({
+                    "success": False,
+                    "error": "Groq did not return a YouTube link, and there are no songs in downloads yet.",
+                }), 404
+            audio_file = _place_in_account(picked, g.user["id"])
+            song_name = audio_file.stem.replace("_", " ")
+            beats = tala_beats(user_prompt, 8)
+            record = {
+                "song_name": song_name,
+                "tala": "Adi Tala" if beats == 8 else f"{beats} beats",
+                "tala_beats": beats,
+                "description": "Groq did not return a YouTube link, so a song already in downloads was used.",
+                "audio_path": str(audio_file.resolve()),
+                "audio_url": f"/audio/{g.user['id']}/{audio_file.name}",
+                "filename": audio_file.name,
+                "prompt": user_prompt,
+            }
 
-        # Step 2: Download YouTube audio via yt-dlp to downloads/
-        audio_file, audio_info = download_song_audio(
-            youtube_url=youtube_url,
-            search_query=search_query,
-            song_name=song_name,
-            output_dir=str(account_folder(DOWNLOADS_DIR, g.user["id"])),
-        )
         mudhra_timeline, mudhra_json_path = write_mudhra_timeline(audio_file, song_name)
 
         # Step 3: Catalog in this account's library
-        record = {
-            **recommendation,
-            "audio_path": str(audio_file.resolve()),
-            "audio_url": f"/audio/{g.user['id']}/{audio_file.name}",
-            "filename": audio_file.name,
-            "audio_info": audio_info,
-        }
         saved_entry = user_library().add_song(record)
         dance_url = run_dance_pipeline(audio_file, saved_entry.get("tala_beats") or 8, g.user["id"])
         saved_entry["dance_url"] = dance_url

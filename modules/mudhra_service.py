@@ -1,8 +1,8 @@
-"""Timestamped, Carnatic-aware semantic mudhra suggestions.
+"""Timestamped mudhra suggestions for a Carnatic recording.
 
-CultureMERT supplies Carnatic-adapted audio representations for change-aware
-temporal smoothing and section boundaries. CLAP ranks semantic descriptions
-for all mudhras. The JSON file remains the number/name source of truth.
+CLAP ranks each audio window against a short audible description of every
+hasta. CultureMERT only marks a musical phrase change, where a smaller lead
+is enough to switch. The JSON file remains the number/name source of truth.
 """
 
 from functools import lru_cache
@@ -27,7 +27,10 @@ WINDOW_SECONDS = 10.0
 HOP_SECONDS = 5.0
 CARNATIC_CONTEXT_SECONDS = 5.0
 MIN_SECTION_SIMILARITY = 0.72
-NEIGHBOR_SCORE_WEIGHT = 0.20
+# Cosine lead required before the displayed hasta changes. A phrase boundary,
+# marked by CultureMERT, may switch on a smaller lead.
+HOLD_MARGIN = 0.02
+PHRASE_MARGIN = 0.01
 KEYS_PATH = Path(__file__).with_name("mudhra_keys.json")
 
 # Short viniyoga/theme summaries, grouped around the common meanings of these
@@ -87,6 +90,63 @@ MUDHRA_THEMES = {
     "Avahittha": "hands held against the heart, modesty, shyness, concealed emotion, or guarded affection",
 }
 
+# What CLAP can actually hear. Mythological names alone collapse to one generic
+# "Carnatic music" score, so each hasta is ranked by a distinct sound.
+MUDHRA_SOUND = {
+    "Pataka": "a broad steady open tone with no sudden accents",
+    "Tripataka": "a bright rising declaration",
+    "Ardhapataka": "a soft thinning melody that gently falls away",
+    "Kartarimukha": "a sharp sudden accent and a quick turn",
+    "Mayura": "a bright ornamented lilting melody",
+    "Ardhachandra": "a slow open calm phrase",
+    "Arala": "a light delicate curved phrase",
+    "Shukatunda": "a narrow focused phrase with pointed accents",
+    "Mushthi": "strong percussive strikes and forceful rhythm",
+    "Shikhara": "a firm grounded tolling pulse",
+    "Kapittha": "a warm sustained reverent phrase",
+    "Katakamukha": "light delicate plucked notes",
+    "Suchi": "a sparse melody with one clear emphasized note",
+    "Chandrakala": "a quiet smooth nocturnal phrase",
+    "Padmakosha": "a warm rounded blooming melody",
+    "Sarpashirsha": "a flowing sliding watery phrase",
+    "Mrigashirsha": "a soft playful light melody",
+    "Simhamukha": "a loud majestic booming phrase",
+    "Kangula": "small bright bell-like accents",
+    "Alapadma": "an expansive lyrical blooming melody",
+    "Chatura": "a quick clever lightly rhythmic phrase",
+    "Bhramara": "a hovering light buzzing ornament",
+    "Hamsasya": "a pure high finely detailed melody",
+    "Hamsapaksha": "a broad gliding spacious melody",
+    "Sandamsha": "a precise focused ritual phrase",
+    "Mukula": "a small contained budding phrase",
+    "Tamrachuda": "a bright alert morning call",
+    "Trishula": "powerful accents grouped in threes",
+    "Anjali": "a quiet prayerful devotional phrase",
+    "Kapota": "a hushed soft respectful phrase",
+    "Karkata": "layered voices gathering and growing",
+    "Swastika": "a steady balanced auspicious pulse",
+    "Dola": "a relaxed slow swaying phrase",
+    "Pushpaputa": "a gentle warm offering",
+    "Utsanga": "a close warm affectionate phrase",
+    "Shivalinga": "a still low devotional drone",
+    "Katakavardhana": "festive ceremonial bright music",
+    "Kartariswastika": "crossing rhythms that branch apart",
+    "Shakata": "a heavy driving low forceful rhythm",
+    "Shankha": "a resonant ceremonial opening call",
+    "Chakra": "a circular repeating rolling rhythm",
+    "Samputa": "a quiet enclosed held tone",
+    "Pasha": "intertwined sustained connected lines",
+    "Kilaka": "a close tender intimate phrase",
+    "Matsya": "an agile flowing watery melody",
+    "Kurma": "a slow patient unhurried pulse",
+    "Varaha": "a low grounded powerful phrase",
+    "Garuda": "a fast soaring bright triumphant melody",
+    "Nagabandha": "a winding mysterious low phrase",
+    "Khatva": "a sparse austere slow phrase",
+    "Bherunda": "paired soaring majestic lines",
+    "Avahittha": "a restrained modest held-back phrase",
+}
+
 
 def _load_keys() -> dict[int, str]:
     raw = json.loads(KEYS_PATH.read_text(encoding="utf-8"))
@@ -96,6 +156,9 @@ def _load_keys() -> dict[int, str]:
     missing = set(keys.values()) - set(MUDHRA_THEMES)
     if missing:
         raise ValueError(f"Missing mudhra semantic descriptions: {', '.join(sorted(missing))}")
+    missing_sounds = set(keys.values()) - set(MUDHRA_SOUND)
+    if missing_sounds:
+        raise ValueError(f"Missing mudhra sound descriptions: {', '.join(sorted(missing_sounds))}")
     return keys
 
 
@@ -152,24 +215,29 @@ def _fallback_audio_embedding(waveform: np.ndarray) -> np.ndarray:
     return (features / (np.linalg.norm(features) + 1e-8)).astype(np.float32)
 
 
-@lru_cache(maxsize=16)
-def _text_features(song_name: str) -> tuple[Any, list[tuple[int, str]]]:
+@lru_cache(maxsize=1)
+def _cached_text_features() -> tuple[Any, list[tuple[int, str]]]:
+    """Average two audible prompts per hasta."""
     torch, F, processor, model = _load_model()
     keys = sorted(_load_keys().items())
-    captions = []
-    for number, name in keys:
-        theme = MUDHRA_THEMES[name]
-        title = f" The Carnatic song is titled {song_name}." if song_name else ""
-        captions.append(
-            f"A Carnatic classical music passage with a mood or expressive meaning of "
-            f"{theme}. This music suits the Bharatanatyam hasta {name}.{title}"
-        )
-    encoded = processor(text=captions, return_tensors="pt", padding=True, truncation=True)
+    prompts = []
+    for _number, name in keys:
+        sound = MUDHRA_SOUND[name]
+        prompts.append(f"This is a sound of {sound}")
+        prompts.append(f"This is a music piece that sounds like {sound}")
+    encoded = processor(text=prompts, return_tensors="pt", padding=True, truncation=True)
     with torch.inference_mode():
         output = model.get_text_features(**encoded)
-        features = _embedding_tensor(output)
-        features = F.normalize(features, dim=-1)
+        features = F.normalize(_embedding_tensor(output), dim=-1)
+        paired = [features[index:index + 2].mean(dim=0) for index in range(0, len(prompts), 2)]
+        features = F.normalize(torch.stack(paired), dim=-1)
     return features, keys
+
+
+def _text_features(song_name: str = "") -> tuple[Any, list[tuple[int, str]]]:
+    """The song title is not used as a prior; every title shares one prompt set."""
+    del song_name
+    return _cached_text_features()
 
 
 def _analyze_window(
@@ -279,6 +347,44 @@ def predict_mudhra_at(
     return _window_scores(audio_path, at_seconds, song_name, window_seconds)
 
 
+def _smooth_scores(score_rows: list[np.ndarray]) -> list[np.ndarray]:
+    """Blend each window with its neighbors so one noisy slice cannot flip the hasta."""
+    smoothed = []
+    for index, current in enumerate(score_rows):
+        total = current.astype(np.float32) * 0.5
+        weight = 0.5
+        if index > 0:
+            total = total + score_rows[index - 1] * 0.25
+            weight += 0.25
+        if index + 1 < len(score_rows):
+            total = total + score_rows[index + 1] * 0.25
+            weight += 0.25
+        smoothed.append(total / weight)
+    return smoothed
+
+
+def _labels_from_scores(
+    score_rows: list[np.ndarray], similarities: list[float | None],
+) -> list[int]:
+    """Hold the current hasta until another one leads, by more after a phrase change."""
+    labels: list[int] = []
+    current: int | None = None
+    for index, scores in enumerate(_smooth_scores(score_rows)):
+        best = int(np.argmax(scores))
+        if current is None:
+            current = best
+        else:
+            similarity = similarities[index] if index < len(similarities) else None
+            margin = PHRASE_MARGIN if similarity is not None and similarity < MIN_SECTION_SIMILARITY else HOLD_MARGIN
+            if float(scores[best] - scores[current]) >= margin:
+                current = best
+        labels.append(current)
+    for index in range(1, len(labels) - 1):
+        if labels[index - 1] == labels[index + 1] and labels[index] != labels[index - 1]:
+            labels[index] = labels[index - 1]
+    return labels
+
+
 def predict_mudhra_timeline(
     audio_path: Path,
     song_name: str = "",
@@ -294,43 +400,30 @@ def predict_mudhra_timeline(
     raw = [item[0] for item in analyzed]
     embeddings = [item[1] for item in analyzed]
     semantic_scores = [np.asarray(item["_all_scores"], dtype=np.float32) for item in raw]
-    # Smooth only across adjacent windows that remain similar in the
-    # Carnatic-adapted representation; stronger changes stay responsive.
+    similarities: list[float | None] = [None]
+    for index in range(1, len(raw)):
+        similarities.append(round(float(np.dot(embeddings[index - 1], embeddings[index])), 4))
+    keys = sorted(_load_keys().items())
+    labels = _labels_from_scores(semantic_scores, similarities)
+    smoothed = _smooth_scores(semantic_scores)
     for index, result in enumerate(raw):
-        current = semantic_scores[index]
-        weighted = current.copy()
-        total_weight = 1.0
-        for neighbor_index in (index - 1, index + 1):
-            if not 0 <= neighbor_index < len(raw):
-                continue
-            similarity = float(np.dot(embeddings[index], embeddings[neighbor_index]))
-            if similarity >= MIN_SECTION_SIMILARITY:
-                weighted += NEIGHBOR_SCORE_WEIGHT * np.asarray(
-                    semantic_scores[neighbor_index], dtype=np.float32,
-                )
-                total_weight += NEIGHBOR_SCORE_WEIGHT
-        weighted /= total_weight
-        keys = sorted(_load_keys().items())
+        chosen = labels[index]
+        number, name = keys[chosen]
         ranked = sorted(
-            ({"number": number, "name": name, "score": round(float(score), 4)}
-             for (number, name), score in zip(keys, weighted.tolist())),
+            ({"number": key_number, "name": key_name, "score": round(float(score), 4)}
+             for (key_number, key_name), score in zip(keys, smoothed[index].tolist())),
             key=lambda item: item["score"], reverse=True,
         )
-        result["mudhra"] = ranked[0]
-        result["alternatives"] = ranked[1:4]
-        result["_all_scores"] = weighted.tolist()
+        result["mudhra"] = {"number": number, "name": name, "score": round(float(smoothed[index][chosen]), 4)}
+        result["alternatives"] = [item for item in ranked if item["number"] != number][:3]
+        result["_all_scores"] = smoothed[index].tolist()
     spans: list[dict[str, Any]] = []
     for index, result in enumerate(raw):
         mudhra = result["mudhra"]
         start = 0.0 if index == 0 else float((centers[index - 1] + centers[index]) / 2)
         end = duration if index == len(centers) - 1 else float((centers[index] + centers[index + 1]) / 2)
-        similarity_to_previous = (
-            None if index == 0
-            else round(float(np.dot(embeddings[index - 1], embeddings[index])), 4)
-        )
-        if (spans and spans[-1]["number"] == mudhra["number"]
-                and similarity_to_previous is not None
-                and similarity_to_previous >= MIN_SECTION_SIMILARITY):
+        similarity_to_previous = similarities[index]
+        if spans and spans[-1]["number"] == mudhra["number"]:
             spans[-1]["end"] = round(end, 2)
             spans[-1]["score"] = round((spans[-1]["score"] + mudhra["score"]) / 2, 4)
         else:
@@ -345,11 +438,11 @@ def predict_mudhra_timeline(
         "semantic_model": MODEL_NAME,
         "carnatic_audio_model": raw[0]["carnatic_audio_model"],
         "selection_basis": (
-            "CLAP semantic ranking across all mudhra descriptions; CultureMERT similarity "
-            "controls temporal smoothing and music-change boundaries."
+            "CLAP ranks audible descriptions of each hasta. A new hasta is shown only when it "
+            "leads the current one; CultureMERT phrase changes may switch on a smaller lead."
             if raw[0]["carnatic_audio_model"] == CARNATIC_MODEL_NAME
-            else "CLAP semantic ranking across all mudhra descriptions; librosa acoustic similarity "
-            "controls temporal smoothing and music-change boundaries because CultureMERT was unavailable."
+            else "CLAP ranks audible descriptions of each hasta. A new hasta is shown only when it "
+            "leads the current one. CultureMERT was unavailable, so phrase changes are not marked."
         ),
         "segments": spans,
     }

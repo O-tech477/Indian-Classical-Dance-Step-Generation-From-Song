@@ -15,5 +15,6 @@ videos/
 output/
 # Secrets
 .env
+instance/
 downloads/
 landmarks_json/.vocab*/

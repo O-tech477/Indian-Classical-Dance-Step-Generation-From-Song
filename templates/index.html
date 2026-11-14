@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Momo+Signature&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Momo+Signature&display=swap" rel="stylesheet">
 </head>
-<body>
+<body data-user-id="{{ user.id }}">
   <div class="shell">
   <aside class="chat-rail" id="chat-rail">
     <div class="rail-top">
@@ -25,6 +25,18 @@
     <p id="storage-note" class="storage-note" hidden></p>
     <p class="rail-label">History</p>
     <div id="chat-list" class="chat-list"></div>
+    <div class="rail-account">
+      {% if user.avatar_url %}
+      <img class="account-avatar" src="{{ user.avatar_url }}" alt="">
+      {% else %}
+      <span class="account-avatar account-avatar-fallback">{{ user.full_name[:1] }}</span>
+      {% endif %}
+      <div class="account-meta">
+        <strong>{{ user.full_name }}</strong>
+        <span>{{ user.email }}</span>
+      </div>
+      <a class="sign-out" href="{{ url_for('logout') }}">Sign out</a>
+    </div>
   </aside>
   <div class="stage">
     <!-- Header -->
@@ -161,7 +173,7 @@
         <h2 class="section-title">Stored Music Library</h2>
         <button id="refresh-lib-btn" class="btn btn-secondary btn-sm">↻ Refresh</button>
       </div>
-      <p class="section-desc">Locally stored audio tracks ready for the dance pipeline in <code>downloads/</code>.</p>
+      <p class="section-desc">Songs for this Google account, kept in its own folder inside <code>downloads/</code>.</p>
 
       <div id="library-list" class="library-grid">
         <p class="loading-text">Loading library...</p>

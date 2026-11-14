@@ -28,15 +28,16 @@ Set your Google Gemini API key:
 export GEMINI_API_KEY="your-gemini-api-key"
 ```
 
-### Supabase chats
-Prompts, the song they produced, and the dance link are stored as chats. Audio files and the stick-figure player stay in `downloads/` and `output/` on this computer. Until Supabase is configured, those chats are written to `downloads/chats.json`.
+### Supabase chats and Google sign-in
+The first screen is Google sign-in through Supabase Auth. Each Google account has one profile, its own chats, and a folder at `downloads/<account-id>/` for that account's songs. The stick-figure player for those songs is written under `output/<account-id>/`.
 
 In the Supabase dashboard:
 
 1. Create a project.
-2. Open **SQL Editor**, paste `supabase/schema.sql`, and run it. That creates `chats` and `chat_turns`, and turns on row level security so the public anon key cannot read them.
+2. Open **SQL Editor**, paste `supabase/schema.sql`, and run it. That creates `profiles`, `chats`, and `chat_turns`, adds `chats.user_id`, and turns on row level security. Run it again if the project was created before accounts existed.
 3. Open **Project Settings → API** and copy the project URL and the **service_role** key. The service role key bypasses row level security. Keep it on the server only. Do not put it in the browser, and do not commit it.
-4. Add both values to `.env` in this folder:
+4. Open **Authentication → Sign In / Providers → Google** and turn Google on. In Google Cloud, create a web OAuth client whose redirect URI is `https://YOUR-PROJECT.supabase.co/auth/v1/callback`, then paste that client id and secret into Supabase. Under **Authentication → URL Configuration**, allow `http://127.0.0.1:6767/auth/callback` (and the same URL with `localhost` if you open the app that way).
+5. Add both Supabase values to `.env` in this folder:
 
 ```bash
 SUPABASE_URL="https://YOUR-PROJECT.supabase.co"
@@ -50,7 +51,7 @@ Start the web app:
 ```bash
 uv run app.py
 ```
-Open [http://localhost:5000](http://localhost:5000) in your browser. You can enter prompts, preview recommended songs, stream the audio, and view your stored music library.
+Open [http://127.0.0.1:6767](http://127.0.0.1:6767) in your browser. Sign in with Google, then enter prompts, stream the audio, and view the songs stored for that account.
 
 ### 3. CLI Music Curation & Download
 ```bash

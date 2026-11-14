@@ -48,3 +48,42 @@ create trigger chats_set_updated_at
 
 alter table public.chats enable row level security;
 alter table public.chat_turns enable row level security;
+
+-- One profile per Google account. The id is the Supabase auth user id.
+create table if not exists public.profiles (
+  id uuid primary key references auth.users (id) on delete cascade,
+  email text,
+  full_name text,
+  avatar_url text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.chats
+  add column if not exists user_id uuid references auth.users (id) on delete cascade;
+
+create index if not exists chats_user_id_updated_at_idx
+  on public.chats (user_id, updated_at desc);
+
+alter table public.profiles enable row level security;
+
+drop policy if exists "read own profile" on public.profiles;
+create policy "read own profile" on public.profiles
+  for select using (auth.uid() = id);
+
+drop policy if exists "own chats" on public.chats;
+create policy "own chats" on public.chats
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "own chat turns" on public.chat_turns;
+create policy "own chat turns" on public.chat_turns
+  for all using (
+    exists (
+      select 1 from public.chats
+      where chats.id = chat_turns.chat_id and chats.user_id = auth.uid()
+    )
+  ) with check (
+    exists (
+      select 1 from public.chats
+      where chats.id = chat_turns.chat_id and chats.user_id = auth.uid()
+    )
+  );

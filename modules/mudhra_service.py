@@ -364,27 +364,53 @@ def _slug(value: str) -> str:
 
 
 def timeline_path_for(audio_path: Path) -> Path:
-    """Per-song mudra map, kept beside the other files in downloads/."""
-    return _downloads_dir() / f"{Path(audio_path).stem}.mudhra.json"
+    """Per-song mudra map, kept beside that song's audio file."""
+    audio_path = Path(audio_path)
+    return audio_path.with_name(f"{audio_path.stem}.mudhra.json")
 
 
-def load_saved_mudhra_timeline(audio_name: str) -> dict[str, Any] | None:
-    """Load the timestamped mudra map for one downloaded song, if it has been written."""
-    audio_name = Path(audio_name).name
-    if not audio_name or audio_name != Path(audio_name).name:
+def _read_timeline(path: Path, audio_name: str) -> dict[str, Any] | None:
+    if not path.is_file():
         return None
-    downloads = _downloads_dir()
-    specific = downloads / f"{Path(audio_name).stem}.mudhra.json"
-    if specific.is_file():
-        return json.loads(specific.read_text(encoding="utf-8"))
-    shared = downloads / "mudhra_timeline.json"
-    if not shared.is_file():
-        return None
-    data = json.loads(shared.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if path.name != "mudhra_timeline.json":
+        return data
     recorded = Path(str(data.get("audio_file") or "")).name
     song = _slug(str(data.get("song_name") or ""))
     if recorded == audio_name or (song and song == _slug(Path(audio_name).stem)):
         return data
+    return None
+
+
+def load_saved_mudhra_timeline(audio_name: str | Path, downloads: Path | None = None) -> dict[str, Any] | None:
+    """Load the timestamped mudra map for one downloaded song, if it has been written."""
+    given = Path(audio_name)
+    folders: list[Path] = []
+    if given.parent != Path(".") or given.is_absolute():
+        found = _read_timeline(given.with_name(f"{given.stem}.mudhra.json"), given.name)
+        if found:
+            return found
+        folders.append(given.parent)
+        audio_name = given.name
+    else:
+        audio_name = given.name
+    if not audio_name or audio_name != Path(audio_name).name:
+        return None
+    if downloads is not None:
+        folders.append(Path(downloads))
+    folders.append(_downloads_dir())
+    seen: set[Path] = set()
+    for folder in folders:
+        resolved = folder.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        specific = _read_timeline(folder / f"{Path(audio_name).stem}.mudhra.json", audio_name)
+        if specific:
+            return specific
+        shared = _read_timeline(folder / "mudhra_timeline.json", audio_name)
+        if shared:
+            return shared
     return None
 
 
@@ -399,7 +425,7 @@ def write_mudhra_timeline(
     destination.parent.mkdir(parents=True, exist_ok=True)
     rendered = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     destination.write_text(rendered, encoding="utf-8")
-    latest = _downloads_dir() / "mudhra_timeline.json"
+    latest = destination.parent / "mudhra_timeline.json"
     if destination.resolve() != latest.resolve():
         latest.parent.mkdir(parents=True, exist_ok=True)
         latest.write_text(rendered, encoding="utf-8")

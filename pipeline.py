@@ -102,7 +102,7 @@ def main():
     log(f"    {len(timeline['segments'])} steps from {len(used)} adavus, covering {total_beats} beats")
 
     log("3/3 writing the player ...")
-    page = write_player(out, song, timeline, load_saved_mudhra_timeline(song.name))
+    page = write_player(out, song, timeline, load_saved_mudhra_timeline(song))
     log(f"done: open {page} in a browser")
 
 

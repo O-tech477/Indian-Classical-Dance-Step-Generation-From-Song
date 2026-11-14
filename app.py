@@ -8,14 +8,23 @@ import re
 import subprocess
 import sys
 import time
+from datetime import timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, g, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from modules.audio_service import cap_song, download_song_audio, sanitize_filename, to_mp3
+from modules.auth_service import (
+    account_folder,
+    finish_google_sign_in,
+    google_provider_status,
+    start_google_sign_in,
+    supabase_configured,
+    write_profile_file,
+)
 from modules.tala import tala_beats
 from modules.chat_store import _title_from_prompt, build_chat_store
 from modules.instrument_service import predict_instruments
@@ -25,6 +34,9 @@ from modules.storage_service import MusicLibrary
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.permanent_session_lifetime = timedelta(days=30)
 
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".opus", ".webm"}
 
@@ -34,14 +46,48 @@ DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 DANCE_ROOT = ROOT / "output"
 MUDHRA_DIR = ROOT / "modules" / "mudhra_dataset"
 ADAVUS_DIR = ROOT / "landmarks_json"
-library = MusicLibrary(storage_dir=str(DOWNLOADS_DIR))
 chat_store, CHAT_BACKEND, CHAT_STATUS = build_chat_store(DOWNLOADS_DIR)
+PUBLIC_ENDPOINTS = {"index", "google_start", "google_callback", "logout", "static"}
 
 
-def run_dance_pipeline(audio_file: Path, tala_beats: int) -> str:
+def _flask_secret() -> str:
+    configured = os.environ.get("FLASK_SECRET_KEY", "").strip()
+    if configured:
+        return configured
+    secret_path = ROOT / "instance" / "flask_secret"
+    secret_path.parent.mkdir(parents=True, exist_ok=True)
+    if secret_path.is_file():
+        saved = secret_path.read_text(encoding="utf-8").strip()
+        if saved:
+            return saved
+    saved = os.urandom(32).hex()
+    secret_path.write_text(saved, encoding="utf-8")
+    return saved
+
+
+app.secret_key = _flask_secret()
+
+
+def current_user() -> dict | None:
+    user = session.get("user")
+    if not isinstance(user, dict) or not user.get("id"):
+        return None
+    return user
+
+
+def user_library() -> MusicLibrary:
+    folder = account_folder(DOWNLOADS_DIR, g.user["id"])
+    return MusicLibrary(storage_dir=str(folder))
+
+
+def callback_url() -> str:
+    return request.url_root.rstrip("/") + "/auth/callback"
+
+
+def run_dance_pipeline(audio_file: Path, tala_beats: int, user_id: str) -> str:
     """Run pipeline.py and return the URL of the stick-figure player."""
     dance_id = re.sub(r"[^A-Za-z0-9._-]", "_", audio_file.stem).strip("._") or "dance"
-    out_dir = DANCE_ROOT / dance_id
+    out_dir = DANCE_ROOT / user_id / dance_id
     out_dir.mkdir(parents=True, exist_ok=True)
     tala = int(tala_beats or 8)
     if tala < 1:
@@ -66,19 +112,84 @@ def run_dance_pipeline(audio_file: Path, tala_beats: int) -> str:
     if completed.returncode != 0 or not (out_dir / "index.html").exists():
         detail = (completed.stderr or completed.stdout or "dance pipeline failed").strip()
         raise RuntimeError(detail[-1500:])
-    return f"/dance/{dance_id}/index.html"
+    return f"/dance/{user_id}/{dance_id}/index.html"
+
+
+@app.before_request
+def require_sign_in():
+    g.user = current_user()
+    if request.endpoint in PUBLIC_ENDPOINTS or (request.endpoint or "").startswith("static"):
+        return None
+    if g.user:
+        return None
+    if request.path.startswith("/api"):
+        return jsonify({"success": False, "error": "Sign in with Google to continue."}), 401
+    return redirect(url_for("index"))
 
 
 @app.route("/")
 def index():
-    """Render the main UI page."""
-    return render_template("index.html")
+    """Show Google sign-in, or the app once an account is signed in."""
+    if not g.user:
+        ready, message = google_provider_status(callback_url()) if supabase_configured() else (
+            False,
+            CHAT_STATUS,
+        )
+        return render_template(
+            "login.html",
+            google_ready=ready and supabase_configured(),
+            google_message=message,
+            auth_error=request.args.get("auth_error") or "",
+        )
+    account_folder(DOWNLOADS_DIR, g.user["id"])
+    return render_template("index.html", user=g.user)
+
+
+@app.route("/auth/google")
+def google_start():
+    """Send the browser to Supabase, which sends it on to Google."""
+    ready, message = google_provider_status(callback_url())
+    if not ready:
+        return redirect(url_for("index", auth_error=message))
+    try:
+        target, verifier = start_google_sign_in(callback_url())
+    except Exception as exc:
+        return redirect(url_for("index", auth_error=str(exc)))
+    session["oauth_verifier"] = verifier
+    return redirect(target)
+
+
+@app.route("/auth/callback")
+def google_callback():
+    """Supabase returns here with the Google sign-in code."""
+    error = request.args.get("error_description") or request.args.get("error")
+    if error:
+        return redirect(url_for("index", auth_error=error))
+    code = request.args.get("code") or ""
+    verifier = session.pop("oauth_verifier", "")
+    if not code or not verifier:
+        return redirect(url_for("index", auth_error="Google sign-in did not finish. Try again."))
+    try:
+        profile = finish_google_sign_in(code, verifier)
+        write_profile_file(account_folder(DOWNLOADS_DIR, profile["id"]), profile)
+    except Exception as exc:
+        return redirect(url_for("index", auth_error=f"Google sign-in failed: {exc}"))
+    session.clear()
+    session["user"] = profile
+    session.permanent = True
+    return redirect(url_for("index"))
+
+
+@app.route("/auth/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("index"))
 
 
 @app.route("/api/songs", methods=["GET"])
 def get_songs():
-    """List all downloaded songs in the library."""
-    songs = library.list_songs()
+    """List songs saved for the signed-in account."""
+    songs = user_library().list_songs()
     return jsonify({"success": True, "songs": songs})
 
 
@@ -87,7 +198,7 @@ def get_mudhra_timeline(filename):
     """Return the saved mudra segments for one song in downloads/."""
     if Path(filename).name != filename:
         return jsonify({"success": False, "error": "Invalid audio filename"}), 400
-    data = load_saved_mudhra_timeline(filename)
+    data = load_saved_mudhra_timeline(filename, account_folder(DOWNLOADS_DIR, g.user["id"]))
     if not data:
         return jsonify({"success": True, "segments": []})
     segments = []
@@ -125,8 +236,9 @@ def get_instruments(filename):
     """Classify a short window around the current position in a downloaded song."""
     if Path(filename).name != filename:
         return jsonify({"success": False, "error": "Invalid audio filename"}), 400
-    audio_path = (DOWNLOADS_DIR / filename).resolve()
-    if not audio_path.is_relative_to(DOWNLOADS_DIR.resolve()) or not audio_path.is_file():
+    folder = account_folder(DOWNLOADS_DIR, g.user["id"])
+    audio_path = (folder / filename).resolve()
+    if not audio_path.is_relative_to(folder) or not audio_path.is_file():
         return jsonify({"success": False, "error": "Audio file not found"}), 404
     try:
         result = predict_instruments(audio_path, request.args.get("time", 0, type=float))
@@ -138,15 +250,28 @@ def get_instruments(filename):
 
 @app.route("/api/chats/status", methods=["GET"])
 def chat_status():
-    """Tell the UI whether chats are stored in Supabase or on this computer."""
-    return jsonify({"success": True, "backend": CHAT_BACKEND, "message": CHAT_STATUS})
+    """Tell the UI whether this account's chats are in Supabase."""
+    if getattr(chat_store, "remote_ready", lambda: False)():
+        return jsonify({
+            "success": True,
+            "backend": "supabase",
+            "message": "Chats are saved in Supabase for this Google account.",
+        })
+    message = CHAT_STATUS
+    if CHAT_BACKEND == "supabase":
+        message = "Chats for this account are in its downloads folder until you run supabase/schema.sql in the Supabase SQL editor."
+    return jsonify({"success": True, "backend": "account", "message": message})
 
 
 @app.route("/api/chats", methods=["GET"])
 def list_chats():
-    """List saved chats, newest activity first."""
+    """List this account's chats, newest activity first."""
     try:
-        return jsonify({"success": True, "chats": chat_store.list_chats(), "backend": CHAT_BACKEND})
+        return jsonify({
+            "success": True,
+            "chats": chat_store.list_chats(g.user["id"]),
+            "backend": "supabase" if chat_store.remote_ready() else "account",
+        })
     except Exception as exc:
         return jsonify({"success": False, "error": f"Could not load chats: {exc}"}), 500
 
@@ -155,7 +280,7 @@ def list_chats():
 def get_chat(chat_id):
     """Return one chat and its prompts."""
     try:
-        chat = chat_store.get_chat(chat_id)
+        chat = chat_store.get_chat(g.user["id"], chat_id)
     except Exception as exc:
         return jsonify({"success": False, "error": f"Could not load chat: {exc}"}), 500
     if not chat:
@@ -167,7 +292,7 @@ def get_chat(chat_id):
 def delete_chat(chat_id):
     """Delete a chat and its saved prompts."""
     try:
-        deleted = chat_store.delete_chat(chat_id)
+        deleted = chat_store.delete_chat(g.user["id"], chat_id)
     except Exception as exc:
         return jsonify({"success": False, "error": f"Could not delete chat: {exc}"}), 500
     if not deleted:
@@ -176,10 +301,15 @@ def delete_chat(chat_id):
 
 
 def _save_chat_turn(chat_id, saved_entry, prompt):
+    user_id = g.user["id"]
     if not chat_id:
-        created = chat_store.create_chat(saved_entry.get("song_name") or _title_from_prompt(prompt))
+        created = chat_store.create_chat(user_id, saved_entry.get("song_name") or _title_from_prompt(prompt))
         chat_id = created["id"]
-    turn = chat_store.add_turn(chat_id, {**saved_entry, "prompt": prompt, "dance_url": saved_entry.get("dance_url")})
+    turn = chat_store.add_turn(
+        user_id,
+        chat_id,
+        {**saved_entry, "prompt": prompt, "dance_url": saved_entry.get("dance_url")},
+    )
     return chat_id, turn
 
 
@@ -197,25 +327,26 @@ def upload_song():
     chat_id = (request.form.get("chat_id") or "").strip()
     song_name = sanitize_filename(Path(uploaded.filename).stem).replace("_", " ")
     beats = tala_beats(prompt, 8) if prompt else 8
-    dest = DOWNLOADS_DIR / f"{sanitize_filename(Path(uploaded.filename).stem)}{ext}"
+    folder = account_folder(DOWNLOADS_DIR, g.user["id"])
+    dest = folder / f"{sanitize_filename(Path(uploaded.filename).stem)}{ext}"
     if dest.exists() or dest.with_suffix(".mp3").exists():
         dest = dest.with_name(f"{dest.stem}_{int(time.time())}{dest.suffix}")
 
     try:
-        if chat_id and not chat_store.get_chat(chat_id):
+        if chat_id and not chat_store.get_chat(g.user["id"], chat_id):
             return jsonify({"success": False, "error": "Chat not found"}), 404
         uploaded.save(dest)
         dest = cap_song(to_mp3(dest), dest.with_suffix(".mp3"))
         prompt = prompt or f"Uploaded {song_name}"
         mudhra_timeline, mudhra_json_path = write_mudhra_timeline(dest, song_name)
-        dance_url = run_dance_pipeline(dest, beats)
-        saved_entry = library.add_song({
+        dance_url = run_dance_pipeline(dest, beats, g.user["id"])
+        saved_entry = user_library().add_song({
             "song_name": song_name,
             "tala": "Adi Tala" if beats == 8 else f"{beats} beats",
             "tala_beats": beats,
             "description": prompt,
             "audio_path": str(dest.resolve()),
-            "audio_url": f"/audio/{dest.name}",
+            "audio_url": f"/audio/{g.user['id']}/{dest.name}",
             "filename": dest.name,
             "prompt": prompt,
             "dance_url": dance_url,
@@ -227,7 +358,7 @@ def upload_song():
             "dance_url": dance_url,
             "mudhra_timeline": mudhra_timeline,
             "mudhra_json_path": str(mudhra_json_path.relative_to(ROOT)),
-            "chat": chat_store.get_chat(chat_id),
+            "chat": chat_store.get_chat(g.user["id"], chat_id),
             "turn": turn,
         })
     except Exception as exc:
@@ -251,7 +382,7 @@ def recommend_and_download():
         return jsonify({"success": False, "error": "Prompt cannot be empty"}), 400
 
     try:
-        if chat_id and not chat_store.get_chat(chat_id):
+        if chat_id and not chat_store.get_chat(g.user["id"], chat_id):
             return jsonify({"success": False, "error": "Chat not found"}), 404
 
         # Step 1: Query Groq with browser search
@@ -269,29 +400,36 @@ def recommend_and_download():
             youtube_url=youtube_url,
             search_query=search_query,
             song_name=song_name,
-            output_dir=str(DOWNLOADS_DIR),
+            output_dir=str(account_folder(DOWNLOADS_DIR, g.user["id"])),
         )
         mudhra_timeline, mudhra_json_path = write_mudhra_timeline(audio_file, song_name)
 
-        # Step 3: Catalog in library
+        # Step 3: Catalog in this account's library
         record = {
             **recommendation,
             "audio_path": str(audio_file.resolve()),
-            "audio_url": f"/audio/{audio_file.name}",
+            "audio_url": f"/audio/{g.user['id']}/{audio_file.name}",
             "filename": audio_file.name,
             "audio_info": audio_info,
         }
-        saved_entry = library.add_song(record)
-        dance_url = run_dance_pipeline(audio_file, saved_entry.get("tala_beats") or 8)
+        saved_entry = user_library().add_song(record)
+        dance_url = run_dance_pipeline(audio_file, saved_entry.get("tala_beats") or 8, g.user["id"])
         saved_entry["dance_url"] = dance_url
         saved_entry["prompt"] = user_prompt
-        saved_entry = library.add_song(saved_entry)
+        saved_entry = user_library().add_song(saved_entry)
 
         if not chat_id:
-            created = chat_store.create_chat(saved_entry.get("song_name") or _title_from_prompt(user_prompt))
+            created = chat_store.create_chat(
+                g.user["id"],
+                saved_entry.get("song_name") or _title_from_prompt(user_prompt),
+            )
             chat_id = created["id"]
 
-        turn = chat_store.add_turn(chat_id, {**saved_entry, "prompt": user_prompt, "dance_url": dance_url})
+        turn = chat_store.add_turn(
+            g.user["id"],
+            chat_id,
+            {**saved_entry, "prompt": user_prompt, "dance_url": dance_url},
+        )
 
         return jsonify({
             "success": True,
@@ -299,7 +437,7 @@ def recommend_and_download():
             "dance_url": dance_url,
             "mudhra_timeline": mudhra_timeline,
             "mudhra_json_path": str(mudhra_json_path.relative_to(ROOT)),
-            "chat": chat_store.get_chat(chat_id),
+            "chat": chat_store.get_chat(g.user["id"], chat_id),
             "turn": turn,
         })
 
@@ -309,26 +447,35 @@ def recommend_and_download():
         return jsonify({"success": False, "error": f"Failed to process request: {str(e)}"}), 500
 
 
-@app.route("/dance/<dance_id>/<path:filename>")
-def serve_dance(dance_id, filename):
-    """Serve a generated stick-figure player and its audio file."""
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", dance_id):
+@app.route("/dance/<user_id>/<dance_id>/<path:filename>")
+def serve_dance(user_id, dance_id, filename):
+    """Serve a stick-figure player that belongs to the signed-in account."""
+    if user_id != g.user["id"] or not re.fullmatch(r"[A-Za-z0-9._-]+", dance_id):
         return jsonify({"error": "Dance not found"}), 404
-    folder = (DANCE_ROOT / dance_id).resolve()
-    if not folder.is_relative_to(DANCE_ROOT.resolve()) or not folder.is_dir():
+    folder = (DANCE_ROOT / user_id / dance_id).resolve()
+    root = (DANCE_ROOT / user_id).resolve()
+    if not folder.is_relative_to(root) or not folder.is_dir():
         return jsonify({"error": "Dance not found"}), 404
     return send_from_directory(folder, filename)
 
 
 @app.route("/audio/<path:filename>")
 def serve_audio(filename):
-    """Stream or serve downloaded audio files."""
-    if (DOWNLOADS_DIR / filename).exists():
-        return send_from_directory(str(DOWNLOADS_DIR), filename, mimetype="audio/mpeg")
-    root_dir = Path(__file__).parent
-    if (root_dir / filename).exists():
-        return send_from_directory(str(root_dir), filename, mimetype="audio/mpeg")
-    return jsonify({"error": "Audio file not found"}), 404
+    """Stream a song from the signed-in account's downloads folder."""
+    folder = account_folder(DOWNLOADS_DIR, g.user["id"])
+    parts = Path(filename).parts
+    if len(parts) == 2 and parts[0] == g.user["id"]:
+        name = parts[1]
+    elif len(parts) == 1:
+        name = parts[0]
+    else:
+        return jsonify({"error": "Audio file not found"}), 404
+    if Path(name).suffix.lower() not in AUDIO_EXTENSIONS:
+        return jsonify({"error": "Audio file not found"}), 404
+    audio_path = (folder / name).resolve()
+    if not audio_path.is_relative_to(folder) or not audio_path.is_file():
+        return jsonify({"error": "Audio file not found"}), 404
+    return send_from_directory(folder, name)
 
 
 if __name__ == "__main__":

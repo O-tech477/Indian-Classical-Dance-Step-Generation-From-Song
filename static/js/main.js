@@ -40,7 +40,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const uploadBtn = document.getElementById('upload-btn');
   const uploadInput = document.getElementById('upload-input');
 
-  let activeChatId = localStorage.getItem('bn-active-chat') || null;
+  const accountId = document.body.dataset.userId || "";
+  const chatKey = "bn-active-chat:" + accountId;
+  let activeChatId = localStorage.getItem(chatKey) || null;
+
+  async function apiFetch(url, options) {
+    const res = await fetch(url, options);
+    if (res.status === 401) {
+      window.location.assign("/");
+      throw new Error("Sign in with Google to continue.");
+    }
+    return res;
+  }
   let turns = [];
   let savedChats = [];
 
@@ -132,7 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
       body.append('audio', file);
       body.append('prompt', promptInput.value.trim());
       body.append('chat_id', activeChatId || '');
-      const res = await fetch('/api/upload', { method: 'POST', body });
+      const res = await apiFetch('/api/upload', { method: 'POST', body });
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Upload failed');
@@ -141,7 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
       loadLibrary();
       if (data.chat && data.chat.id) {
         activeChatId = data.chat.id;
-        localStorage.setItem('bn-active-chat', activeChatId);
+        localStorage.setItem(chatKey, activeChatId);
         turns = data.chat.turns || [];
         renderThread();
         loadChats();
@@ -182,7 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 20000);
 
     try {
-      const res = await fetch('/api/recommend-and-download', {
+      const res = await apiFetch('/api/recommend-and-download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -204,7 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
       loadLibrary();
       if (data.chat && data.chat.id) {
         activeChatId = data.chat.id;
-        localStorage.setItem('bn-active-chat', activeChatId);
+        localStorage.setItem(chatKey, activeChatId);
         turns = data.chat.turns || [];
         renderThread();
         loadChats();
@@ -266,7 +277,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function loadLibrary() {
     try {
-      const res = await fetch('/api/songs');
+      const res = await apiFetch('/api/songs');
       const data = await res.json();
       if (!data.success) return;
 
@@ -318,7 +329,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function startNewChat() {
     activeChatId = null;
     turns = [];
-    localStorage.removeItem('bn-active-chat');
+    localStorage.removeItem(chatKey);
     renderThread();
     renderChatList(savedChats);
     showPrompt();
@@ -327,7 +338,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function loadStorageStatus() {
     try {
-      const res = await fetch('/api/chats/status');
+      const res = await apiFetch('/api/chats/status');
       const data = await res.json();
       if (!data.success) return;
       if (data.backend === 'supabase') {
@@ -343,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function loadChats() {
     try {
-      const res = await fetch('/api/chats');
+      const res = await apiFetch('/api/chats');
       const data = await res.json();
       if (!data.success) return;
       savedChats = data.chats || [];
@@ -376,14 +387,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function openChat(chatId) {
     try {
-      const res = await fetch('/api/chats/' + encodeURIComponent(chatId));
+      const res = await apiFetch('/api/chats/' + encodeURIComponent(chatId));
       const data = await res.json();
       if (!res.ok || !data.success) {
         if (activeChatId === chatId) startNewChat();
         return;
       }
       activeChatId = data.chat.id;
-      localStorage.setItem('bn-active-chat', activeChatId);
+      localStorage.setItem(chatKey, activeChatId);
       turns = data.chat.turns || [];
       renderThread();
       renderChatList(savedChats);
@@ -395,7 +406,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function removeChat(chatId) {
     try {
-      const res = await fetch('/api/chats/' + encodeURIComponent(chatId), { method: 'DELETE' });
+      const res = await apiFetch('/api/chats/' + encodeURIComponent(chatId), { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok || !data.success) return;
       if (activeChatId === chatId) startNewChat();

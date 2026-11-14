@@ -1111,3 +1111,116 @@ audio {
   box-shadow: none;
   padding: 0;
 }
+
+.rail-account {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 8px 10px;
+  padding: 12px 8px 4px;
+  border-top: 1px solid rgba(255, 229, 72, 0.25);
+}
+
+.account-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  grid-row: span 2;
+}
+
+.account-avatar-fallback {
+  display: grid;
+  place-items: center;
+  background: var(--amber-flame);
+  color: var(--dark-walnut);
+  font-weight: 700;
+}
+
+.account-meta {
+  min-width: 0;
+}
+
+.account-meta strong,
+.account-meta span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-meta strong {
+  font-size: 14px;
+}
+
+.account-meta span {
+  color: rgba(255, 229, 72, 0.75);
+  font-size: 12px;
+}
+
+.sign-out {
+  grid-column: 2;
+  justify-self: start;
+  color: var(--banana-cream);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+body.auth-screen {
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top, rgba(255, 178, 15, 0.35), transparent 42%),
+    var(--dark-walnut);
+}
+
+.login-card {
+  width: min(420px, 100%);
+  background: var(--surface-color);
+  color: var(--text-primary);
+  border-radius: 24px;
+  padding: 36px 32px 32px;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.login-card h1 {
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 40px;
+  line-height: 1;
+}
+
+.login-lead,
+.login-note,
+.login-error {
+  color: var(--text-secondary);
+  font-size: 15px;
+}
+
+.login-error {
+  color: var(--tomato);
+}
+
+.google-btn {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  color: #3c4043;
+  border: 1px solid #dadce0;
+  border-radius: 999px;
+  padding: 12px 18px;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+}
+
+.google-btn:hover {
+  background: #f8f9fa;
+}

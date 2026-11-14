@@ -19,6 +19,7 @@ from modules.audio_service import cap_song, download_song_audio, sanitize_filena
 from modules.tala import tala_beats
 from modules.chat_store import _title_from_prompt, build_chat_store
 from modules.instrument_service import predict_instruments
+from modules.mudhra_service import write_mudhra_timeline
 from modules.llm_service import recommend_song
 from modules.storage_service import MusicLibrary
 
@@ -167,6 +168,7 @@ def upload_song():
         uploaded.save(dest)
         dest = cap_song(to_mp3(dest), dest.with_suffix(".mp3"))
         prompt = prompt or f"Uploaded {song_name}"
+        mudhra_timeline, mudhra_json_path = write_mudhra_timeline(dest, song_name)
         dance_url = run_dance_pipeline(dest, beats)
         saved_entry = library.add_song({
             "song_name": song_name,
@@ -184,6 +186,8 @@ def upload_song():
             "success": True,
             "song": saved_entry,
             "dance_url": dance_url,
+            "mudhra_timeline": mudhra_timeline,
+            "mudhra_json_path": str(mudhra_json_path.relative_to(ROOT)),
             "chat": chat_store.get_chat(chat_id),
             "turn": turn,
         })
@@ -228,6 +232,7 @@ def recommend_and_download():
             song_name=song_name,
             output_dir=str(DOWNLOADS_DIR),
         )
+        mudhra_timeline, mudhra_json_path = write_mudhra_timeline(audio_file, song_name)
 
         # Step 3: Catalog in library
         record = {
@@ -253,6 +258,8 @@ def recommend_and_download():
             "success": True,
             "song": saved_entry,
             "dance_url": dance_url,
+            "mudhra_timeline": mudhra_timeline,
+            "mudhra_json_path": str(mudhra_json_path.relative_to(ROOT)),
             "chat": chat_store.get_chat(chat_id),
             "turn": turn,
         })

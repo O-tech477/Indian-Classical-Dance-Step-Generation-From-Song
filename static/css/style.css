@@ -1,4 +1,6 @@
 /* static/css/style.css */
+@import url('https://fonts.googleapis.com/css2?family=Momo+Signature&display=swap');
+
 :root {
   --dark-walnut: #582707;
   --rust-brown: #972d07;
@@ -259,10 +261,12 @@ body {
 }
 
 .welcome h1 {
-  font-family: 'Playfair Display', Georgia, serif;
-  font-size: 40px;
+  font-family: 'Momo Signature', cursive, sans-serif;
+  font-size: 52px;
+  font-weight: 400;
   color: var(--dark-walnut);
-  letter-spacing: -0.03em;
+  letter-spacing: normal;
+  line-height: 1.25;
 }
 
 .welcome p {
@@ -365,7 +369,7 @@ body {
   }
 
   .welcome h1 {
-    font-size: 30px;
+    font-size: 36px;
   }
 }
 

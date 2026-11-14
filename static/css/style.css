@@ -255,18 +255,19 @@ body {
 
 .welcome {
   margin: auto;
-  width: min(640px, calc(100% - 32px));
+  width: min(760px, calc(100% - 32px));
   text-align: center;
   padding: 24px 8px 8px;
 }
 
 .welcome h1 {
   font-family: 'Momo Signature', cursive, sans-serif;
-  font-size: 52px;
+  font-size: clamp(28px, 4.5vw, 48px);
   font-weight: 400;
   color: var(--dark-walnut);
   letter-spacing: normal;
   line-height: 1.25;
+  white-space: nowrap;
 }
 
 .welcome p {
@@ -369,7 +370,8 @@ body {
   }
 
   .welcome h1 {
-    font-size: 36px;
+    font-size: clamp(20px, 5.5vw, 32px);
+    white-space: nowrap;
   }
 }
 

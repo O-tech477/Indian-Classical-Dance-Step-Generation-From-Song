@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign in · BeatNatyam</title>
+  <title>Sign in · BeatsNatyam</title>
+  <link rel="icon" type="image/png" href="/static/img/logo.png">
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,8 +12,8 @@
 </head>
 <body class="auth-screen">
   <main class="login-card">
-    <span class="logo-mark" aria-hidden="true">🪷</span>
-    <h1>BeatNatyam</h1>
+    <img class="login-logo" src="/static/img/logo.png" alt="" onerror="this.style.display='none'">
+    <h1 class="sr-only">BeatsNatyam</h1>
     <p class="login-lead">Sign in with Google. Each account keeps its own chats and songs.</p>
     {% if auth_error %}
     <p class="login-error">{{ auth_error }}</p>

@@ -1204,6 +1204,15 @@ body.auth-screen {
   line-height: 1;
 }
 
+.login-logo {
+  display: block;
+  align-self: center;
+  width: min(100%, 320px);
+  height: auto;
+  margin: 0 auto 8px;
+  object-fit: contain;
+}
+
 .login-lead,
 .login-note,
 .login-error {

@@ -1,8 +1,8 @@
-"""Timestamped, audio-text mudhra suggestions for Carnatic music.
+"""Timestamped, Carnatic-aware semantic mudhra suggestions.
 
-CLAP compares short audio windows with Carnatic-music descriptions of the
-traditional themes represented by each mudhra. The number/name source of truth
-is modules/mudhra_keys.json; suggestions are ranked, not choreography labels.
+CultureMERT supplies Carnatic-adapted audio representations for change-aware
+temporal smoothing and section boundaries. CLAP ranks semantic descriptions
+for all mudhras. The JSON file remains the number/name source of truth.
 """
 
 from functools import lru_cache
@@ -20,9 +20,13 @@ import librosa
 import numpy as np
 
 MODEL_NAME = "laion/clap-htsat-unfused"
+CARNATIC_MODEL_NAME = "ntua-slp/CultureMERT-95M"
 SAMPLE_RATE = 48_000
 WINDOW_SECONDS = 10.0
 HOP_SECONDS = 5.0
+CARNATIC_CONTEXT_SECONDS = 5.0
+MIN_SECTION_SIMILARITY = 0.72
+NEIGHBOR_SCORE_WEIGHT = 0.20
 KEYS_PATH = Path(__file__).with_name("mudhra_keys.json")
 
 # Short viniyoga/theme summaries, grouped around the common meanings of these
@@ -113,6 +117,40 @@ def _load_model() -> tuple[Any, Any, Any, Any]:
     return torch, F, processor, model
 
 
+@lru_cache(maxsize=1)
+def _load_carnatic_model() -> tuple[Any, Any, Any, Any]:
+    """Load Carnatic-adapted CultureMERT as a music representation encoder."""
+    try:
+        import torch
+        import torch.nn.functional as F
+        from transformers import AutoFeatureExtractor, AutoModel
+        from transformers.utils import logging as transformers_logging
+        from huggingface_hub.utils import disable_progress_bars
+    except (ImportError, OSError, RuntimeError):
+        # Preserve the semantic predictor when optional model weights cannot
+        # be downloaded or loaded (for example, in an offline run).
+        return None, None, None, None
+
+    disable_progress_bars()
+    transformers_logging.set_verbosity_error()
+    try:
+        processor = AutoFeatureExtractor.from_pretrained(CARNATIC_MODEL_NAME, trust_remote_code=True)
+        model = AutoModel.from_pretrained(CARNATIC_MODEL_NAME, trust_remote_code=True)
+        model.eval()
+        return torch, F, processor, model
+    except (OSError, RuntimeError):
+        return None, None, None, None
+
+
+def _fallback_audio_embedding(waveform: np.ndarray) -> np.ndarray:
+    """Compute a small acoustic descriptor if CultureMERT is unavailable."""
+    chroma = librosa.feature.chroma_stft(y=waveform, sr=SAMPLE_RATE, n_fft=4096)
+    energy = librosa.feature.rms(y=waveform)[0]
+    centroid = librosa.feature.spectral_centroid(y=waveform, sr=SAMPLE_RATE)[0]
+    features = np.concatenate((chroma.mean(axis=1), [energy.mean(), centroid.mean() / SAMPLE_RATE]))
+    return (features / (np.linalg.norm(features) + 1e-8)).astype(np.float32)
+
+
 @lru_cache(maxsize=16)
 def _text_features(song_name: str) -> tuple[Any, list[tuple[int, str]]]:
     torch, F, processor, model = _load_model()
@@ -133,9 +171,9 @@ def _text_features(song_name: str) -> tuple[Any, list[tuple[int, str]]]:
     return features, keys
 
 
-def _window_scores(
+def _analyze_window(
     audio_path: Path, at_seconds: float, song_name: str = "", window_seconds: float = WINDOW_SECONDS,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], np.ndarray]:
     audio_path = Path(audio_path)
     if not audio_path.is_file():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -148,6 +186,43 @@ def _window_scores(
     expected = int(window_seconds * SAMPLE_RATE)
     waveform = np.pad(waveform[:expected], (0, max(0, expected - len(waveform))))
 
+    # CultureMERT uses a 5-second context at 24 kHz. Its representation is
+    # used for musical continuity/change detection, not as a text classifier.
+    culture_torch, culture_F, culture_processor, culture_model = _load_carnatic_model()
+    if culture_model is not None:
+        try:
+            culture_sample_rate = int(culture_processor.sampling_rate)
+            context_samples = int(CARNATIC_CONTEXT_SECONDS * SAMPLE_RATE)
+            context_start = max(0, (len(waveform) - context_samples) // 2)
+            culture_waveform = waveform[context_start:context_start + context_samples]
+            culture_waveform = np.pad(
+                culture_waveform, (0, max(0, context_samples - len(culture_waveform))),
+            )
+            if culture_sample_rate != SAMPLE_RATE:
+                culture_waveform = librosa.resample(
+                    culture_waveform, orig_sr=SAMPLE_RATE, target_sr=culture_sample_rate,
+                )
+            culture_inputs = culture_processor(
+                culture_waveform, sampling_rate=culture_sample_rate, return_tensors="pt",
+            )
+            with culture_torch.inference_mode():
+                culture_output = culture_model(**culture_inputs, output_hidden_states=True)
+                hidden_states = getattr(culture_output, "hidden_states", None)
+                culture_features = hidden_states[-1] if hidden_states else getattr(
+                    culture_output, "last_hidden_state", None,
+                )
+                if culture_features is None:
+                    raise RuntimeError("CultureMERT did not return audio representations.")
+                culture_embedding = culture_F.normalize(culture_features.mean(dim=1), dim=-1)[0]
+            culture_embedding = culture_embedding.detach().cpu().numpy().astype(np.float32)
+            culture_encoder_name = CARNATIC_MODEL_NAME
+        except (OSError, RuntimeError, ValueError):
+            culture_embedding = _fallback_audio_embedding(waveform)
+            culture_encoder_name = "librosa acoustic-feature fallback"
+    else:
+        culture_embedding = _fallback_audio_embedding(waveform)
+        culture_encoder_name = "librosa acoustic-feature fallback"
+
     torch, F, processor, model = _load_model()
     audio_inputs = processor(audio=waveform, sampling_rate=SAMPLE_RATE, return_tensors="pt")
     text_features, keys = _text_features(song_name.strip())
@@ -156,22 +231,31 @@ def _window_scores(
         audio_features = _embedding_tensor(output)
         audio_features = F.normalize(audio_features, dim=-1)
         similarities = (text_features @ audio_features[0].unsqueeze(-1)).squeeze(-1)
+    score_values = similarities.cpu().tolist()
     ranked = sorted(
-        (
-            {"number": number, "name": name, "score": round(float(score), 4)}
-            for (number, name), score in zip(keys, similarities.cpu().tolist())
-        ),
+        ({"number": number, "name": name, "score": round(float(score), 4)}
+         for (number, name), score in zip(keys, score_values)),
         key=lambda item: item["score"],
         reverse=True,
     )
     winner = ranked[0]
-    return {
+    return ({
         "mudhra": winner,
         "alternatives": ranked[1:4],
         "window_start": round(start, 2),
         "window_end": round(min(duration, start + window_seconds), 2),
-        "model": MODEL_NAME,
-    }
+        "semantic_model": MODEL_NAME,
+        "carnatic_audio_model": culture_encoder_name,
+        "_all_scores": score_values,
+    }, culture_embedding)
+
+
+def _window_scores(
+    audio_path: Path, at_seconds: float, song_name: str = "", window_seconds: float = WINDOW_SECONDS,
+) -> dict[str, Any]:
+    result, _ = _analyze_window(audio_path, at_seconds, song_name, window_seconds)
+    result.pop("_all_scores", None)
+    return result
 
 
 def _embedding_tensor(output: Any) -> Any:
@@ -205,21 +289,69 @@ def predict_mudhra_timeline(
         raise ValueError("window_seconds and hop_seconds must be positive")
     duration = float(librosa.get_duration(path=str(audio_path)))
     centers = np.arange(0, max(duration, 0.01), hop_seconds)
-    raw = [_window_scores(audio_path, float(t), song_name, window_seconds) for t in centers]
+    analyzed = [_analyze_window(audio_path, float(t), song_name, window_seconds) for t in centers]
+    raw = [item[0] for item in analyzed]
+    embeddings = [item[1] for item in analyzed]
+    semantic_scores = [np.asarray(item["_all_scores"], dtype=np.float32) for item in raw]
+    # Smooth only across adjacent windows that remain similar in the
+    # Carnatic-adapted representation; stronger changes stay responsive.
+    for index, result in enumerate(raw):
+        current = semantic_scores[index]
+        weighted = current.copy()
+        total_weight = 1.0
+        for neighbor_index in (index - 1, index + 1):
+            if not 0 <= neighbor_index < len(raw):
+                continue
+            similarity = float(np.dot(embeddings[index], embeddings[neighbor_index]))
+            if similarity >= MIN_SECTION_SIMILARITY:
+                weighted += NEIGHBOR_SCORE_WEIGHT * np.asarray(
+                    semantic_scores[neighbor_index], dtype=np.float32,
+                )
+                total_weight += NEIGHBOR_SCORE_WEIGHT
+        weighted /= total_weight
+        keys = sorted(_load_keys().items())
+        ranked = sorted(
+            ({"number": number, "name": name, "score": round(float(score), 4)}
+             for (number, name), score in zip(keys, weighted.tolist())),
+            key=lambda item: item["score"], reverse=True,
+        )
+        result["mudhra"] = ranked[0]
+        result["alternatives"] = ranked[1:4]
+        result["_all_scores"] = weighted.tolist()
     spans: list[dict[str, Any]] = []
     for index, result in enumerate(raw):
         mudhra = result["mudhra"]
         start = 0.0 if index == 0 else float((centers[index - 1] + centers[index]) / 2)
         end = duration if index == len(centers) - 1 else float((centers[index] + centers[index + 1]) / 2)
-        if spans and spans[-1]["number"] == mudhra["number"]:
+        similarity_to_previous = (
+            None if index == 0
+            else round(float(np.dot(embeddings[index - 1], embeddings[index])), 4)
+        )
+        if (spans and spans[-1]["number"] == mudhra["number"]
+                and similarity_to_previous is not None
+                and similarity_to_previous >= MIN_SECTION_SIMILARITY):
             spans[-1]["end"] = round(end, 2)
             spans[-1]["score"] = round((spans[-1]["score"] + mudhra["score"]) / 2, 4)
         else:
             spans.append({
                 "start": round(start, 2), "end": round(end, 2),
                 "number": mudhra["number"], "name": mudhra["name"], "score": mudhra["score"],
+                "music_similarity_to_previous": similarity_to_previous,
             })
-    return {"song_name": song_name, "duration": round(duration, 2), "model": MODEL_NAME, "segments": spans}
+    return {
+        "song_name": song_name,
+        "duration": round(duration, 2),
+        "semantic_model": MODEL_NAME,
+        "carnatic_audio_model": raw[0]["carnatic_audio_model"],
+        "selection_basis": (
+            "CLAP semantic ranking across all mudhra descriptions; CultureMERT similarity "
+            "controls temporal smoothing and music-change boundaries."
+            if raw[0]["carnatic_audio_model"] == CARNATIC_MODEL_NAME
+            else "CLAP semantic ranking across all mudhra descriptions; librosa acoustic similarity "
+            "controls temporal smoothing and music-change boundaries because CultureMERT was unavailable."
+        ),
+        "segments": spans,
+    }
 
 
 def write_mudhra_timeline(

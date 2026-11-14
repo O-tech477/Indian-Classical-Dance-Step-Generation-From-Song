@@ -79,14 +79,15 @@ MUDHRA_THEMES = {
     "Nagabandha": "serpents entwined, union, embrace, mystery, or sacred power",
     "Khatva": "a cot, ascetic life, rest, renunciation, or a ritual object",
     "Bherunda": "paired birds, duality, union, flight, or majestic power",
+    "Avahittha": "hands held against the heart, modesty, shyness, concealed emotion, or guarded affection",
 }
 
 
 def _load_keys() -> dict[int, str]:
     raw = json.loads(KEYS_PATH.read_text(encoding="utf-8"))
     keys = {int(number): name for number, name in raw.items()}
-    if set(keys) != set(range(1, 52)):
-        raise ValueError(f"{KEYS_PATH} must contain mudhra numbers 1 through 51")
+    if set(keys) != set(range(1, 53)):
+        raise ValueError(f"{KEYS_PATH} must contain mudhra numbers 1 through 52")
     missing = set(keys.values()) - set(MUDHRA_THEMES)
     if missing:
         raise ValueError(f"Missing mudhra semantic descriptions: {', '.join(sorted(missing))}")

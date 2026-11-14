@@ -26,11 +26,16 @@ def build_timeline(song, ana, extra_features, vocab, steps, Tq, first, tala, war
     }
 
 
-def write_player(out, song, timeline):
+def write_player(out, song, timeline, mudhras=None):
     """Write index.html with the timeline inlined, and copy the song next to it."""
     if song.resolve() != (out / song.name).resolve():
         shutil.copy(song, out / song.name)
+    mudhra_payload = "null"
+    segments = (mudhras or {}).get("segments") or []
+    if segments:
+        mudhra_payload = json.dumps({"segments": segments}, separators=(",", ":")).replace("</", "<\\/")
     page = TEMPLATE.read_text().replace("__TIMELINE__", json.dumps(timeline, separators=(",", ":")).replace("</", "<\\/"))
+    page = page.replace("__MUDHRAS__", mudhra_payload)
     page = page.replace("__TITLE__", html.escape(song.stem))
     (out / "index.html").write_text(page)
     return out / "index.html"

@@ -44,6 +44,7 @@ from dance.planner import plan
 from dance.player import build_timeline, write_player
 from dance.vocabulary import META_FILE, load_vocab, resolve_adavus
 from modules.audio_service import MAX_SONG_SECONDS, cap_song
+from modules.mudhra_service import load_saved_mudhra_timeline
 
 
 def main():
@@ -101,7 +102,7 @@ def main():
     log(f"    {len(timeline['segments'])} steps from {len(used)} adavus, covering {total_beats} beats")
 
     log("3/3 writing the player ...")
-    page = write_player(out, song, timeline)
+    page = write_player(out, song, timeline, load_saved_mudhra_timeline(song.name))
     log(f"done: open {page} in a browser")
 
 

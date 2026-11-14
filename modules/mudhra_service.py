@@ -8,6 +8,7 @@ for all mudhras. The JSON file remains the number/name source of truth.
 from functools import lru_cache
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -354,19 +355,54 @@ def predict_mudhra_timeline(
     }
 
 
+def _downloads_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "downloads"
+
+
+def _slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def timeline_path_for(audio_path: Path) -> Path:
+    """Per-song mudra map, kept beside the other files in downloads/."""
+    return _downloads_dir() / f"{Path(audio_path).stem}.mudhra.json"
+
+
+def load_saved_mudhra_timeline(audio_name: str) -> dict[str, Any] | None:
+    """Load the timestamped mudra map for one downloaded song, if it has been written."""
+    audio_name = Path(audio_name).name
+    if not audio_name or audio_name != Path(audio_name).name:
+        return None
+    downloads = _downloads_dir()
+    specific = downloads / f"{Path(audio_name).stem}.mudhra.json"
+    if specific.is_file():
+        return json.loads(specific.read_text(encoding="utf-8"))
+    shared = downloads / "mudhra_timeline.json"
+    if not shared.is_file():
+        return None
+    data = json.loads(shared.read_text(encoding="utf-8"))
+    recorded = Path(str(data.get("audio_file") or "")).name
+    song = _slug(str(data.get("song_name") or ""))
+    if recorded == audio_name or (song and song == _slug(Path(audio_name).stem)):
+        return data
+    return None
+
+
 def write_mudhra_timeline(
     audio_path: Path, song_name: str = "", output_path: Path | None = None,
 ) -> tuple[dict[str, Any], Path]:
-    """Predict a full song and save it to downloads/mudhra_timeline.json by default."""
+    """Predict a full song and save it as downloads/<song>.mudhra.json."""
     audio_path = Path(audio_path)
     result = predict_mudhra_timeline(audio_path, song_name)
-    destination = (
-        Path(output_path)
-        if output_path
-        else Path(__file__).resolve().parents[1] / "downloads" / "mudhra_timeline.json"
-    )
+    result["audio_file"] = audio_path.name
+    destination = Path(output_path) if output_path else timeline_path_for(audio_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    rendered = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
+    destination.write_text(rendered, encoding="utf-8")
+    latest = _downloads_dir() / "mudhra_timeline.json"
+    if destination.resolve() != latest.resolve():
+        latest.parent.mkdir(parents=True, exist_ok=True)
+        latest.write_text(rendered, encoding="utf-8")
     return result, destination
 
 

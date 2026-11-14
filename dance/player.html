@@ -6,11 +6,18 @@
 :root{--bg:#fafaf7;--fg:#1c1c1a;--mut:#6b6b66;--line:#d8d8d0;--acc:#c2410c;--card:#fff}
 @media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecece6;--mut:#9a9a92;--line:#34342f;--acc:#fb923c;--card:#1f1f1c;color-scheme:dark}}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif;padding:16px}
-main{max-width:720px;margin:0 auto}
+main{max-width:1040px;margin:0 auto}
 h1{font-size:18px;margin:0 0 8px}
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:12px;align-items:start}
 canvas{width:100%;display:block;background:var(--card);border:1px solid var(--line);border-radius:10px}
 #fig{height:auto;aspect-ratio:3/2}
 #bar{height:44px;margin-top:8px;cursor:pointer}
+.mudhra-card{display:flex;flex-direction:column;gap:8px;padding:12px;background:var(--card);border:1px solid var(--line);border-radius:10px}
+.mudhra-kicker{margin:0;color:var(--mut);font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+#mudhra-img{width:100%;aspect-ratio:3/4;object-fit:contain;background:#111;border-radius:8px}
+#mudhra-name{margin:0;font-size:22px;line-height:1.15}
+#mudhra-when{margin:0;color:var(--mut);font-size:12px}
+@media (max-width:760px){.stage{grid-template-columns:1fr}.mudhra-card{max-width:280px}}
 audio{width:100%;margin:10px 0}
 .instrument-panel{margin:4px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
 .instrument-heading{display:flex;justify-content:space-between;gap:8px;align-items:baseline;font-weight:600}
@@ -27,8 +34,18 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--mut)}
 .warn{color:var(--acc);font-size:13px}
 </style></head><body><main>
 <h1>__TITLE__</h1>
+<div class="stage">
+<div>
 <canvas id="fig"></canvas>
 <canvas id="bar"></canvas>
+</div>
+<aside class="mudhra-card" aria-live="polite">
+<p class="mudhra-kicker">Mudra</p>
+<img id="mudhra-img" alt="" hidden>
+<h2 id="mudhra-name">Mudra</h2>
+<p id="mudhra-when"></p>
+</aside>
+</div>
 <audio id="au" controls preload="auto"></audio>
 <section id="instrument-panel" class="instrument-panel" aria-live="polite">
 <div class="instrument-heading"><span>Instruments playing now</span><span id="instrument-window" class="instrument-window"></span></div>
@@ -45,6 +62,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--mut)}
 <details><summary>All steps (click to jump)</summary><div id="list"></div></details>
 <script>
 const T = __TIMELINE__;
+const MUDHRAS = __MUDHRAS__;
 const BONES = ["sp","lua","lfa","rua","rfa","lt","ls","rt","rs"];
 const BASE = {sp:180,lua:-100,lfa:-100,rua:100,rfa:100,lt:-40,ls:30,rt:40,rs:-30};
 const bt = T.beats.map(b => b.t), nb = bt.length, segs = T.segments, tala = T.tala_beats;
@@ -266,9 +284,50 @@ function click(accent){
   g.gain.exponentialRampToValueAtTime(.001, ac.currentTime+.06);
   o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+.07);
 }
+let mudhraSegments = (MUDHRAS && MUDHRAS.segments) || [];
+let shownMudhraKey = '';
+function mudhraAt(t){
+  if (!mudhraSegments.length) return null;
+  for (const s of mudhraSegments) if (t >= Number(s.start) && t < Number(s.end)) return s;
+  if (t < Number(mudhraSegments[0].start)) return mudhraSegments[0];
+  return mudhraSegments[mudhraSegments.length - 1];
+}
+function renderMudhra(t){
+  const s = mudhraAt(t);
+  const key = s ? String(s.number) + '@' + s.start : 'none';
+  if (key === shownMudhraKey) return;
+  shownMudhraKey = key;
+  const img = document.getElementById('mudhra-img');
+  const name = document.getElementById('mudhra-name');
+  const when = document.getElementById('mudhra-when');
+  if (!s) {
+    img.hidden = true;
+    img.removeAttribute('src');
+    name.textContent = 'No mudra map';
+    when.textContent = 'This song has no mudra timeline in downloads yet.';
+    return;
+  }
+  const number = Number(s.number);
+  img.hidden = false;
+  img.src = '/mudhras/' + number + '.png';
+  img.alt = s.name || ('Mudra ' + number);
+  name.textContent = s.name || ('Mudra ' + number);
+  when.textContent = Number(s.start).toFixed(1) + 's – ' + Number(s.end).toFixed(1) + 's';
+}
+async function loadMudhras(){
+  if (!mudhraSegments.length && T.audio_file) {
+    try {
+      const response = await fetch('/api/mudhra/' + encodeURIComponent(T.audio_file));
+      const data = await response.json();
+      if (response.ok && data.success) mudhraSegments = data.segments || [];
+    } catch (error) { /* the card keeps the empty state */ }
+  }
+  shownMudhraKey = '';
+  renderMudhra(au.currentTime || 0);
+}
 function frame(){
   const t = au.currentTime, b = beatAt(t), bi = Math.floor(b);
-  drawFigure(poseFor(b)); drawBar(t);
+  drawFigure(poseFor(b)); drawBar(t); renderMudhra(t);
   const i = segIndexAt(b), s = i >= 0 ? segs[i] : null;
   document.getElementById('now').textContent = s && b < s.start_beat + s.n_beats ? s.adavu + '  x' + s.speed : '-';
   const rel = bi - T.first_sam_index, pos = ((rel % tala) + tala) % tala + 1;
@@ -297,6 +356,7 @@ function init(){
   });
   document.getElementById('warns').textContent = T.warnings.join('  |  ');
   window.__player = {beatAt, poseFor, segIndexAt, fk, drawFigure};
+  loadMudhras();
   requestAnimationFrame(frame);
 }
 let instrumentRequestInFlight = false, lastInstrumentRequestAt = 0;

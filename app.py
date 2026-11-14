@@ -19,7 +19,7 @@ from modules.audio_service import cap_song, download_song_audio, sanitize_filena
 from modules.tala import tala_beats
 from modules.chat_store import _title_from_prompt, build_chat_store
 from modules.instrument_service import predict_instruments
-from modules.mudhra_service import write_mudhra_timeline
+from modules.mudhra_service import load_saved_mudhra_timeline, write_mudhra_timeline
 from modules.llm_service import recommend_song
 from modules.storage_service import MusicLibrary
 
@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parent
 DOWNLOADS_DIR = ROOT / "downloads"
 DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 DANCE_ROOT = ROOT / "output"
+MUDHRA_DIR = ROOT / "modules" / "mudhra_dataset"
 ADAVUS_DIR = ROOT / "landmarks_json"
 library = MusicLibrary(storage_dir=str(DOWNLOADS_DIR))
 chat_store, CHAT_BACKEND, CHAT_STATUS = build_chat_store(DOWNLOADS_DIR)
@@ -79,6 +80,44 @@ def get_songs():
     """List all downloaded songs in the library."""
     songs = library.list_songs()
     return jsonify({"success": True, "songs": songs})
+
+
+@app.route("/api/mudhra/<path:filename>", methods=["GET"])
+def get_mudhra_timeline(filename):
+    """Return the saved mudra segments for one song in downloads/."""
+    if Path(filename).name != filename:
+        return jsonify({"success": False, "error": "Invalid audio filename"}), 400
+    data = load_saved_mudhra_timeline(filename)
+    if not data:
+        return jsonify({"success": True, "segments": []})
+    segments = []
+    for segment in data.get("segments") or []:
+        number = segment.get("number")
+        if number is None:
+            continue
+        segments.append({
+            "start": segment.get("start"),
+            "end": segment.get("end"),
+            "number": number,
+            "name": segment.get("name"),
+        })
+    return jsonify({
+        "success": True,
+        "song_name": data.get("song_name"),
+        "audio_file": data.get("audio_file") or filename,
+        "segments": segments,
+    })
+
+
+@app.route("/mudhras/<int:number>.png")
+def serve_mudhra_image(number):
+    """Serve one hasta photograph from the numbered mudra set."""
+    if not 1 <= number <= 52:
+        return jsonify({"error": "Mudra not found"}), 404
+    image = MUDHRA_DIR / f"{number}.png"
+    if not image.is_file():
+        return jsonify({"error": "Mudra not found"}), 404
+    return send_from_directory(MUDHRA_DIR, image.name)
 
 
 @app.route("/api/instruments/<path:filename>", methods=["GET"])

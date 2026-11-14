@@ -1,5 +1,21 @@
 [
   {
+    "id": "1794636405512",
+    "song_name": "Leelajagajjyothi",
+    "composer": null,
+    "raga": null,
+    "tala": "Adi Tala",
+    "tala_beats": 8,
+    "youtube_url": null,
+    "description": "Uploaded Leelajagajjyothi",
+    "filename": "Leelajagajjyothi_1794636251.mp3",
+    "audio_path": "/home/O-tech477/Desktop/BharatyanatiyamAndMusic/downloads/Leelajagajjyothi_1794636251.mp3",
+    "audio_url": "/audio/Leelajagajjyothi_1794636251.mp3",
+    "prompt": "Uploaded Leelajagajjyothi",
+    "dance_url": "/dance/Leelajagajjyothi_1794636251/index.html",
+    "created_at": "2026-11-14 11:36:45"
+  },
+  {
     "id": "1794620531665",
     "song_name": "Karnataka",
     "composer": null,
@@ -64,6 +80,22 @@
     "created_at": "2026-11-14 07:06:11"
   },
   {
+    "id": "1794619599804",
+    "song_name": "GanapatiTala",
+    "composer": null,
+    "raga": null,
+    "tala": "Adi Tala",
+    "tala_beats": 8,
+    "youtube_url": null,
+    "description": "Uploaded GanapatiTala",
+    "filename": "GanapatiTala_1794619589.mp3",
+    "audio_path": "/home/O-tech477/Desktop/BharatyanatiyamAndMusic/downloads/GanapatiTala_1794619589.mp3",
+    "audio_url": "/audio/GanapatiTala_1794619589.mp3",
+    "prompt": "Uploaded GanapatiTala",
+    "dance_url": "/dance/GanapatiTala_1794619589/index.html",
+    "created_at": "2026-11-14 06:56:39"
+  },
+  {
     "id": "1794619043179",
     "song_name": "Jai Jai Ganapati",
     "composer": "Ganapati Saccidananda",
@@ -78,6 +110,22 @@
     "prompt": "give ganpati tala",
     "dance_url": "/dance/Jai_Jai_Ganapati/index.html",
     "created_at": "2026-11-14 06:47:31"
+  },
+  {
+    "id": "1794617792009",
+    "song_name": "Leelajagajjyothi",
+    "composer": null,
+    "raga": null,
+    "tala": "Adi Tala",
+    "tala_beats": 8,
+    "youtube_url": null,
+    "description": "Uploaded Leelajagajjyothi",
+    "filename": "Leelajagajjyothi_1794617777.mp3",
+    "audio_path": "/home/O-tech477/Desktop/BharatyanatiyamAndMusic/downloads/Leelajagajjyothi_1794617777.mp3",
+    "audio_url": "/audio/Leelajagajjyothi_1794617777.mp3",
+    "prompt": "Uploaded Leelajagajjyothi",
+    "dance_url": "/dance/Leelajagajjyothi_1794617777/index.html",
+    "created_at": "2026-11-14 06:26:32"
   },
   {
     "id": "1794616834381",

@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BeatNatyam</title>
+  <title>BeatsNatyam</title>
+  <link rel="icon" type="image/png" href="/static/img/logo.png">
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,10 +16,7 @@
   <aside class="chat-rail" id="chat-rail">
     <div class="rail-top">
       <div class="rail-brand">
-        <span class="logo-mark" aria-hidden="true">🪷</span>
-        <div>
-          <strong>BeatNatyam</strong>
-        </div>
+        <img class="logo-mark" src="/static/img/logo.png" alt="BeatsNatyam" onerror="this.style.display='none'">
       </div>
       <button type="button" id="new-chat-btn" class="new-chat-btn">+ New chat</button>
     </div>
@@ -42,9 +40,9 @@
     <!-- Header -->
     <header class="header">
       <div class="logo-group">
-        <span class="logo-icon">🪷</span>
+        <img class="logo-icon" src="/static/img/logo.png" alt="" onerror="this.style.display='none'">
         <div>
-          <h1>BeatNatyam</h1>
+          <h1>BeatsNatyam</h1>
           <p class="subtitle">AI-guided Indian classical song discovery, YouTube audio extraction, and dance accompaniment storage</p>
         </div>
       </div>
@@ -55,6 +53,7 @@
       <section class="card curate-section">
         <div class="transcript">
           <div id="welcome" class="welcome">
+            <img class="welcome-logo" src="/static/img/logo.png" alt="BeatsNatyam logo" onerror="this.style.display='none'">
             <h1>What shall we dance to?</h1>
             <p>Describe a mood, adavu, raga, tala or song.</p>
           </div>
@@ -149,7 +148,7 @@
               <span class="pipeline-icon">⚡</span>
               <strong>Ready for Stick-Figure Choreography</strong>
             </div>
-            <p class="pipeline-hint">Run the Bharatanatyam adavu pipeline with this song:</p>
+            <p class="pipeline-hint">Run the BeatsNatyam adavu pipeline with this song:</p>
             <div class="code-snippet">
               <code id="pipeline-code">uv run pipeline.py ...</code>
               <button type="button" id="copy-cmd-btn" class="btn-copy">Copy</button>
@@ -182,7 +181,7 @@
 
     <!-- Footer -->
     <footer class="footer">
-      <p>BeatNatyam & Music Analysis Pipeline &copy; 2026. Powered by Google Gemini & yt-dlp.</p>
+      <p>BeatsNatyam & Music Analysis Pipeline &copy; 2026. Powered by Google Gemini & yt-dlp.</p>
     </footer>
   </div>
   </div>

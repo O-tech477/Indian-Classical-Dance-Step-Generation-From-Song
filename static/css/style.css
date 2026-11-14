@@ -97,17 +97,16 @@ body {
 .rail-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  padding: 4px 0 2px;
 }
 
 .logo-mark {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  background: var(--amber-flame);
-  font-size: 18px;
+  display: block;
+  width: 100%;
+  max-width: 230px;
+  height: auto;
+  object-fit: contain;
 }
 
 .rail-brand strong {
@@ -258,6 +257,14 @@ body {
   width: min(760px, calc(100% - 32px));
   text-align: center;
   padding: 24px 8px 8px;
+}
+
+.welcome-logo {
+  display: block;
+  margin: 0 auto 18px;
+  width: clamp(240px, 38vw, 460px);
+  height: auto;
+  object-fit: contain;
 }
 
 .welcome h1 {
@@ -419,7 +426,9 @@ body {
 }
 
 .logo-icon {
-  font-size: 34px;
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
 }
 
 h1 {

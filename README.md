@@ -22,7 +22,7 @@ flowchart TD
   browser["Signed-in browser"] --> flask["Flask app.py"]
   flask --> auth["Supabase Auth: Google, PKCE"]
   flask --> chats["Chats: Supabase, or chats.json in the account folder"]
-  flask --> groq["Groq browser search"]
+  flask --> groq["GPT-OSS browser search"]
   flask --> upload["Uploaded audio"]
   groq --> audio["yt-dlp, then MP3, first 2 minutes"]
   upload --> audio

@@ -133,4 +133,4 @@ The video file name, without the extension, becomes the adavu name.
 
 ## AI code disclosure
 
-Parts of this repository, including application code and this README, were drafted with AI coding assistance in Cursor. The choreography rules, tala table, and adavu lengths above are the project’s own decisions and remain the source of truth. Song recommendations, hasta labels, section names, and instrument tags are model suggestions. They are not a substitute for a teacher or a notated composition.
+Parts of this repository, including application code, were drafted with AI coding assistance in Cursor. The choreography rules, tala table, and adavu lengths above are the project’s own decisions and remain the source of truth. Song recommendations, hasta labels, section names, and instrument tags are model suggestions. They are not a substitute for a teacher or a notated composition.

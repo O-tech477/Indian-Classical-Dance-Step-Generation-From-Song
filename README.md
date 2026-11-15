@@ -10,8 +10,8 @@ As development progressed, we refined these ideas into the implementation archit
 # Initial Architecture Sketches
 
 <p align="center">
-  <img src="./assets/architecture/initial-architecture1.jpg" width="48%">
-  <img src="./assets/architecture/initial-architecture2.jpg" width="48%">
+  <img src="./assets/architecture/initial-architecture1.png" width="48%">
+  <img src="./assets/architecture/initial-architecture2.png" width="48%">
 </p>
 
 

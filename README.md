@@ -2,6 +2,19 @@
 
 BeatsNatyam maps Bharatanatyam **nritta** — rhythm and tempo, not lyric meaning — onto an Indian classical recording. A prompt or an uploaded track becomes a two-minute MP3, a beat grid, a sequence of adavus, and a stick-figure player. Hasta suggestions and instrument tags sit beside the dance; they do not choose the steps.
 
+# Initial Architecture Brainstorming
+
+During the first two hours of the hackathon, our team collaboratively brainstormed and sketched the initial system architecture. These rough hand-drawn diagrams capture our early ideas, proposed workflows, and the direction we initially envisioned for the project.
+
+As development progressed, we refined these ideas into the implementation architecture presented below.
+# Initial Architecture Sketches
+
+<p align="center">
+  <img src="./assets/architecture/initial-architecture1.jpg" width="48%">
+  <img src="./assets/architecture/initial-architecture2.jpg" width="48%">
+</p>
+
+
 ## Architecture
 
 ```mermaid

@@ -75,11 +75,9 @@ Each Google account has one profile, its own chats, songs under `downloads/<acco
 - The piece ends on a teermanam when one fits the closing phrase. The first phrase prefers tatta, the second natta.
 - If a new family cannot tile a phrase, the previous family is repeated. A tail that nothing can tile holds the final pose.
 
-Onset density chooses the preferred speed. Harmonic versus percussive balance, and the pallavi / anupallavi / charanam labels, only bias which family is cheaper. Those labels are unsupervised clusters of tala cycles, named in order. They are a structural hint, not a parse of the composition.
-
 **The body travels; the joints do not invert.** Bone angles shape the pose. Stage travel comes from image landmarks: the hip for sideways movement, the lower foot for jumps. World landmarks are centred on the hips, so they are not used for travel. Cycles are stored so they end where they start. Comparing those resting poses made two similar stances alternate for a whole song, so the planner does not do that. It scores the join from the end of one cycle to the start of the next, and it penalises a path that walks off the stage. Knees and elbows are clamped to hinge limits so a bad landmark cannot hyperextend a joint.
 
-**Hastas change on the music, and the names stay in a file.** CLAP ranks each 10-second window against a short audible description of every hasta. CultureMERT only marks a phrase change, where a smaller lead is enough to switch. `modules/mudhra_keys.json` is the number and name source of truth. Photographs are the numbered set `1.png`–`52.png`.
+**Hastas change on the music, and the names stay in a file.** CLAP ranks each 10-second window against a short audible description of every hasta. CultureMERT only marks a phrase change, where a smaller lead is enough to switch. `modules/mudhra_keys.json` is the number and name source of truth. 
 
 **Instrument names are a map, not a Carnatic classifier.** A 10-second window around the playhead goes through an AudioSet AST model. AudioSet labels are then renamed to the nearest Carnatic or Hindustani instrument (drum to mridangam, drone to tanpura, and so on). The model loads on the first request so the app can start without it.
 
@@ -102,6 +100,7 @@ SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
 ```
 
 `GROQ_API_KEY` is required for song search. Uploading your own audio does not call Groq. The default model is `openai/gpt-oss-20b` with Groq browser search.
+Though we use an API the model we are using is open-sourced i.e. GPT-OSS 20B. 
 
 ### Supabase and Google sign-in
 
@@ -146,4 +145,4 @@ The video file name, without the extension, becomes the adavu name.
 
 ## AI code disclosure
 
-Parts of this repository, including application code, were drafted with AI coding assistance in Cursor. The choreography rules, tala table, and adavu lengths above are the project’s own decisions and remain the source of truth. Song recommendations, hasta labels, section names, and instrument tags are model suggestions. They are not a substitute for a teacher or a notated composition.
+Parts of this repository, including application code, were drafted with AI coding assistance. The choreography rules, tala table, and adavu lengths above are the project’s own decisions and remain the source of truth. Song recommendations, hasta labels, section names, and instrument tags are model suggestions. They are not a substitute for a teacher or a notated composition.
